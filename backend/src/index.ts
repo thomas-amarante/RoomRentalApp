@@ -21,7 +21,13 @@ const pool = new Pool({
 // ROTA 1: Listar todas as salas (GET /api/rooms)
 app.get('/api/rooms', async (req: Request, res: Response) => {
   try {
-    const result = await pool.query('SELECT * FROM rooms ORDER BY name');
+    const query = `
+      SELECT * FROM rooms 
+      ORDER BY 
+        CASE WHEN name ILIKE '%Carina Cigolini%' THEN 0 ELSE 1 END,
+        name
+    `;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
     console.error(err);

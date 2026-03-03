@@ -78,8 +78,8 @@ export default function Reservations() {
         )}
       </AnimatePresence>
 
-      <main className="main-container">
-        <section style={{ marginBottom: '60px' }}>
+      <main className="main-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+        <section style={{ marginBottom: '60px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', marginBottom: '12px', color: 'black' }}>
             Cartões de Acesso.
           </h1>
@@ -89,18 +89,18 @@ export default function Reservations() {
         </section>
 
         {loading ? (
-          <div style={{ display: 'grid', gap: '16px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '16px', width: '100%', maxWidth: '1200px' }}>
             {[1, 2, 3].map((i) => (
-              <div key={i} className="skeleton" style={{ height: '180px', borderRadius: '24px' }} />
+              <div key={i} className="skeleton" style={{ height: '180px', width: '350px', borderRadius: '24px' }} />
             ))}
           </div>
         ) : reservations.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '100px', border: '1px dashed var(--border)', borderRadius: '24px' }}>
+          <div style={{ textAlign: 'center', padding: '100px', border: '1px dashed var(--border)', borderRadius: '24px', width: '100%', maxWidth: '600px' }}>
             <p style={{ color: 'rgba(0,0,0,0.4)' }}>Nenhum agendamento ativo.</p>
             <Link href="/" style={{ display: 'inline-block', marginTop: '20px', color: 'var(--accent)', textDecoration: 'none' }}>Ver salas disponíveis →</Link>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '24px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '24px', width: '100%', maxWidth: '1200px' }}>
             {reservations.map((res) => (
               <div key={res.id} style={{
                 background: 'white',
@@ -110,7 +110,9 @@ export default function Reservations() {
                 display: 'flex',
                 flexDirection: 'column',
                 transition: 'transform 0.3s ease',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+                boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                width: '350px',
+                maxWidth: '100%'
               }}>
                 {/* Cabeçalho do Ticket */}
                 <div style={{ padding: '24px', borderBottom: '1px dashed var(--border)', position: 'relative' }}>
@@ -119,7 +121,25 @@ export default function Reservations() {
                   </div>
                   <h3 style={{ fontSize: '22px', fontWeight: 700, color: 'black', marginBottom: '4px' }}>{res.room_name}</h3>
                   <div style={{ color: 'rgba(0,0,0,0.5)', fontSize: '13px', fontWeight: 500 }} className="mono">
-                    {res.booking_period.replace(/[\"\[\)]/g, '').replace(',', ' até ')}
+                    {(() => {
+                      try {
+                        // Exemplo de formato vindo do banco (Postgres TSRANGE): "[\"2026-03-03 09:00:00\",\"2026-03-03 10:00:00\")"
+                        const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
+                        const [start, end] = cleanStr.split(',');
+                        if (!start || !end) return cleanStr;
+
+                        const startDate = new Date(start);
+                        const endDate = new Date(end);
+
+                        const dateStr = startDate.toLocaleDateString('pt-BR');
+                        const startTime = startDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        const endTime = endDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+                        return `${dateStr} - ${startTime} às ${endTime}`;
+                      } catch (e) {
+                        return res.booking_period.replace(/[\"\[\)]/g, '').replace(',', ' até ');
+                      }
+                    })()}
                   </div>
 
                   {/* Círculos das laterais (Estilo Ticket) */}
