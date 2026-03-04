@@ -27,7 +27,14 @@ export default function Home() {
   const router = useRouter();
 
   // --- Lógica de Data/Hora ---
-  const today = new Date().toISOString().split('T')[0];
+  const getLocalDateString = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  const today = getLocalDateString();
   const [date, setDate] = useState(today);
 
   const hourlyOptions = ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
@@ -48,7 +55,7 @@ export default function Home() {
       router.push('/login');
     } else {
       setUser(JSON.parse(storedUser));
-      fetch('http://localhost:3001/api/rooms')
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/rooms`)
         .then(res => res.json())
         .then(data => setRooms(data))
         .catch(() => setLoading(false))
@@ -80,9 +87,12 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch('http://localhost:3001/api/reservations', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/reservations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token || ''}`
+        },
         body: JSON.stringify({
           room_id: selectedRoom.id,
           user_id: user.id,

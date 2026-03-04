@@ -27,9 +27,14 @@ export default function Reservations() {
     if (storedUser) {
       const userData = JSON.parse(storedUser);
       setUser(userData);
-      fetch(`http://localhost:3001/api/reservations/${userData.id}`)
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/reservations/${userData.id}`, {
+        headers: {
+          'Authorization': `Bearer ${userData.token || ''}`
+        }
+      })
         .then(res => res.json())
         .then(data => {
+          if (data.error) throw new Error(data.error);
           setReservations(data);
           setLoading(false);
         })
@@ -100,7 +105,7 @@ export default function Reservations() {
             <Link href="/" style={{ display: 'inline-block', marginTop: '20px', color: 'var(--accent)', textDecoration: 'none' }}>Ver salas disponíveis →</Link>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '24px', width: '100%', maxWidth: '1200px' }}>
+          <div className="grid-3-col">
             {reservations.map((res) => (
               <div key={res.id} style={{
                 background: 'white',
@@ -111,16 +116,35 @@ export default function Reservations() {
                 flexDirection: 'column',
                 transition: 'transform 0.3s ease',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                width: '350px',
-                maxWidth: '100%'
+                width: '100%'
               }}>
                 {/* Cabeçalho do Ticket */}
                 <div style={{ padding: '24px', borderBottom: '1px dashed var(--border)', position: 'relative' }}>
-                  <div style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.05em' }}>
+                  <div style={{
+                    fontSize: '11px',
+                    color: res.status === 'confirmed' ? 'var(--accent)' : '#ff3b30',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    marginBottom: '8px',
+                    letterSpacing: '0.05em'
+                  }}>
                     {res.status === 'confirmed' ? '✓ AGENDAMENTO VÁLIDO' : '● EXPIRADO/CANCELADO'}
                   </div>
-                  <h3 style={{ fontSize: '22px', fontWeight: 700, color: 'black', marginBottom: '4px' }}>{res.room_name}</h3>
-                  <div style={{ color: 'rgba(0,0,0,0.5)', fontSize: '13px', fontWeight: 500 }} className="mono">
+                  <h3 style={{
+                    fontSize: '22px',
+                    fontWeight: 700,
+                    color: res.status === 'confirmed' ? 'black' : 'rgba(0,0,0,0.3)',
+                    marginBottom: '4px',
+                    textDecoration: res.status === 'confirmed' ? 'none' : 'line-through'
+                  }}>
+                    {res.room_name}
+                  </h3>
+                  <div style={{
+                    color: res.status === 'confirmed' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.3)',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    textDecoration: res.status === 'confirmed' ? 'none' : 'line-through'
+                  }} className="mono">
                     {(() => {
                       try {
                         // Exemplo de formato vindo do banco (Postgres TSRANGE): "[\"2026-03-03 09:00:00\",\"2026-03-03 10:00:00\")"
@@ -171,7 +195,7 @@ export default function Reservations() {
                     justifyContent: 'center'
                   }}>
                     <QRCodeSVG
-                      value={`RES-ID:${res.id}`}
+                      value={`${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/lookup/${res.id}`}
                       size={80}
                       level="M"
                       includeMargin={false}

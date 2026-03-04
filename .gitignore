@@ -1,0 +1,18 @@
+# Security: Ignore all environment variable files recursively
+.env*
+!.env.example
+
+# Dependency directories
+node_modules/
+**/node_modules/
+dist/
+.next/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+postgres_data/
+

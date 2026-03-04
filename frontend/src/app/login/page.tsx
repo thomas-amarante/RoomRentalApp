@@ -29,7 +29,7 @@ export default function Login() {
       mode === 'login' ? { email, password } : { email };
 
     try {
-      const res = await fetch(`http://localhost:3001${endpoint}`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -41,7 +41,7 @@ export default function Login() {
         if (mode === 'forgot') {
           setMessage(data.message);
         } else {
-          localStorage.setItem('roomrental_user', JSON.stringify(data.user));
+          localStorage.setItem('roomrental_user', JSON.stringify({ ...data.user, token: data.token }));
           router.push('/');
         }
       } else {

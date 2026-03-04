@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import { authenticateToken, requireAdmin, AuthRequest } from './middleware/auth';
 
 dotenv.config();
 
@@ -18,7 +19,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-// ROTA 1: Listar todas as salas (GET /api/rooms)
+// ROTA 1: Listar todas as salas (GET /api/rooms) - PÚBLICA
 app.get('/api/rooms', async (req: Request, res: Response) => {
   try {
     const query = `
@@ -35,11 +36,23 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
   }
 });
 
-// ROTA 2: Criar uma Reserva
-app.post('/api/reservations', async (req: Request, res: Response) => {
+// ROTA 2: Criar uma Reserva - PROTEGIDA
+app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { room_id, user_id, start_time, end_time, total_price } = req.body;
 
-  if (new Date(start_time) < new Date()) {
+  // Garantir que o usuário só pode criar reservas para ele mesmo (ou pular se ele for admin testando)
+  if (req.user?.id !== user_id && !req.user?.is_admin) {
+    return res.status(403).json({ error: 'Operação não permitida.' });
+  }
+
+  // Verifica se a data do agendamento é no passado garantindo que estamos comparando no mesmo fuso
+  const requestDate = new Date(start_time);
+  const now = new Date();
+
+  // Como o start_time vem do front sem fuso explícito (ex "2026-03-25 08:00:00"), 
+  // o JS pode criá-lo com um offset diferente do "now". 
+  // Vamos remover a checagem rigorosa de timezone do JS e usar valor numérico básico para evitar bloqueio falso.
+  if (requestDate.getTime() < now.getTime() - (24 * 60 * 60 * 1000)) { // Dá uma tolerância de 1 dia por causa de fuso horário
     return res.status(400).json({ error: 'Não é possível agendar em horários passados.' });
   }
 
@@ -72,16 +85,45 @@ app.post('/api/reservations', async (req: Request, res: Response) => {
   }
 });
 
-// ROTA 2.1: Obter reservas do usuário
-app.get('/api/reservations/:userId', async (req: Request, res: Response) => {
+// ROTA 2.0: Consulta pública de reserva por ID (para QR Code) - PÚBLICA
+app.get('/api/lookup/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT r.id, r.booking_period, r.status, r.total_price,
+             ro.name as room_name,
+             u.name as user_name
+      FROM reservations r
+      JOIN rooms ro ON r.room_id = ro.id
+      JOIN users u ON r.user_id = u.id
+      WHERE r.id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Reserva não encontrada.' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar reserva.' });
+  }
+});
+
+// ROTA 2.1: Obter reservas do usuário - PROTEGIDA
+app.get('/api/reservations/:userId', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { userId } = req.params;
+
+  if (req.user?.id !== userId && !req.user?.is_admin) {
+    return res.status(403).json({ error: 'Acesso negado às reservas de outro usuário.' });
+  }
+
   try {
     const query = `
       SELECT r.*, ro.name as room_name, ro.description as room_description
       FROM reservations r
       JOIN rooms ro ON r.room_id = ro.id
       WHERE r.user_id = $1
-      ORDER BY r.created_at DESC
+      ORDER BY lower(r.booking_period) ASC
     `;
     const result = await pool.query(query, [userId]);
     res.json(result.rows);
@@ -91,15 +133,15 @@ app.get('/api/reservations/:userId', async (req: Request, res: Response) => {
   }
 });
 
-// ROTA 2.2: Obter todas as reservas (Admin)
-app.get('/api/admin/reservations', async (req: Request, res: Response) => {
+// ROTA 2.2: Obter todas as reservas (Admin) - PROTEGIDA (ADMINS SOMENTE)
+app.get('/api/admin/reservations', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const query = `
       SELECT r.*, ro.name as room_name, u.name as user_name, u.email as user_email
       FROM reservations r
       JOIN rooms ro ON r.room_id = ro.id
       JOIN users u ON r.user_id = u.id
-      ORDER BY r.created_at DESC
+      ORDER BY lower(r.booking_period) ASC
     `;
     const result = await pool.query(query);
     res.json(result.rows);
@@ -109,8 +151,8 @@ app.get('/api/admin/reservations', async (req: Request, res: Response) => {
   }
 });
 
-// ROTA 2.3: Cancelar reserva (Admin)
-app.patch('/api/admin/reservations/:id/cancel', async (req: Request, res: Response) => {
+// ROTA 2.3: Cancelar reserva (Admin) - PROTEGIDA (ADMINS SOMENTE)
+app.patch('/api/admin/reservations/:id/cancel', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
     await pool.query('UPDATE reservations SET status = $1 WHERE id = $2', ['cancelled', id]);
