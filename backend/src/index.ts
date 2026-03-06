@@ -19,6 +19,16 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+// Testar conexão com o banco ao iniciar
+pool.connect((err, client, release) => {
+  if (err) {
+    console.error('❌ ERRO AO CONECTAR NO POSTGRES:', err.stack);
+  } else {
+    console.log('✅ CONECTADO AO BANCO DE DADOS POSTGRES COM SUCESSO');
+    release();
+  }
+});
+
 // ROTA 1: Listar todas as salas (GET /api/rooms) - PÚBLICA
 app.get('/api/rooms', async (req: Request, res: Response) => {
   try {
