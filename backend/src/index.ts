@@ -39,10 +39,53 @@ const client = new MercadoPagoConfig({
 app.get('/api/rooms', async (req: Request, res: Response) => {
   try {
     const query = `
-      SELECT * FROM rooms 
+      WITH hourly_slots AS (
+        SELECT 
+          r.id AS room_id,
+          -- Gera slots de hora em hora para os próximos 15 dias
+          generate_series(
+            date_trunc('hour', NOW() AT TIME ZONE 'America/Sao_Paulo') + interval '1 hour', 
+            (NOW() AT TIME ZONE 'America/Sao_Paulo')::date + interval '15 days', 
+            '1 hour'::interval
+          ) AS slot_start
+        FROM rooms r
+      ),
+      valid_slots AS (
+        SELECT 
+          hs.room_id, 
+          hs.slot_start,
+          hs.slot_start + interval '1 hour' AS slot_end
+        FROM hourly_slots hs
+        -- Filtra apenas horário comercial: entre 08:00 e 18:00 (última sala encerra 19h)
+        WHERE EXTRACT(HOUR FROM hs.slot_start) >= 8 
+          AND EXTRACT(HOUR FROM hs.slot_start) <= 18
+      ),
+      available_slots AS (
+        SELECT 
+          vs.room_id, 
+          vs.slot_start
+        FROM valid_slots vs
+        LEFT JOIN reservations res 
+          ON res.room_id = vs.room_id 
+          AND res.status != 'cancelled'
+          -- Checa se o slot gerado colide com algum período existente no banco usando TSRANGE
+          AND tsrange(vs.slot_start, vs.slot_end) && res.booking_period
+        WHERE res.id IS NULL -- Só mantém slots on não rolou JOIN com nenhuma reserva
+      ),
+      first_available AS (
+        SELECT room_id, MIN(slot_start) as next_availability
+        FROM available_slots
+        GROUP BY room_id
+      )
+      
+      SELECT
+        r.*,
+        fa.next_availability
+      FROM rooms r
+      LEFT JOIN first_available fa ON r.id = fa.room_id
       ORDER BY 
-        CASE WHEN name ILIKE '%Carina Cigolini%' THEN 0 ELSE 1 END,
-        name
+        CASE WHEN r.name ILIKE '%Carina Cigolini%' THEN 0 ELSE 1 END,
+        r.name
     `;
     const result = await pool.query(query);
     res.json(result.rows);
@@ -309,14 +352,35 @@ app.put('/api/admin/reservations/:id', authenticateToken, requireAdmin, async (r
 app.post('/api/auth/register', async (req: Request, res: Response) => {
   const { name, email, password, phone } = req.body;
   try {
-    const salt = await bcrypt.genSalt(10);
-    const password_hash = await bcrypt.hash(password, salt);
-    const newUser = await pool.query(
-      "INSERT INTO users (name, email, password_hash, phone, is_phone_verified) VALUES ($1, $2, $3, $4, FALSE) RETURNING id, name, email, phone, is_phone_verified",
-      [name, email, password_hash, phone]
-    );
+    const existingUserCheck = await pool.query("SELECT id, is_phone_verified FROM users WHERE email = $1", [email]);
+    let user;
 
-    const user = newUser.rows[0];
+    if (existingUserCheck.rows.length > 0) {
+      const existingUser = existingUserCheck.rows[0];
+      if (existingUser.is_phone_verified) {
+        return res.status(400).json({ error: 'E-mail já está em uso.' });
+      }
+
+      // Overwrite the unverified user
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(password, salt);
+      const updatedUser = await pool.query(
+        "UPDATE users SET name = $1, password_hash = $2, phone = $3 WHERE email = $4 RETURNING id, name, email, phone, is_phone_verified",
+        [name, password_hash, phone, email]
+      );
+      user = updatedUser.rows[0];
+
+      // Exclui códigos velhos pendentes do usuário sobrescrito
+      await pool.query("DELETE FROM verification_codes WHERE user_id = $1", [user.id]);
+    } else {
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(password, salt);
+      const newUser = await pool.query(
+        "INSERT INTO users (name, email, password_hash, phone, is_phone_verified) VALUES ($1, $2, $3, $4, FALSE) RETURNING id, name, email, phone, is_phone_verified",
+        [name, email, password_hash, phone]
+      );
+      user = newUser.rows[0];
+    }
 
     // Trigger initial verification code
     try {
@@ -634,6 +698,27 @@ setInterval(async () => {
     console.error('❌ Erro no envio de lembretes de pagamento:', err);
   }
 }, 60000); // Roda a cada 1 minuto
+
+// Cleanup: Remover contas inativas/não-verificadas há mais de 24 horas
+setInterval(async () => {
+  try {
+    const oldUsers = await pool.query(`
+      SELECT id FROM users 
+      WHERE is_phone_verified = FALSE 
+      AND created_at < NOW() - INTERVAL '24 hours'
+    `);
+
+    if (oldUsers.rowCount && oldUsers.rowCount > 0) {
+      const userIds = oldUsers.rows.map(u => u.id);
+      await pool.query('DELETE FROM verification_codes WHERE user_id = ANY($1)', [userIds]);
+
+      const result = await pool.query('DELETE FROM users WHERE id = ANY($1)', [userIds]);
+      console.log(`🧹 Cleanup: ${result.rowCount} conta(s) inativa(s) e não verificada(s) deletada(s).`);
+    }
+  } catch (err) {
+    console.error('❌ Erro no cleanup de contas abandonadas:', err);
+  }
+}, 60 * 60 * 1000); // Roda a cada 1 hora
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

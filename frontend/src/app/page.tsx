@@ -15,6 +15,36 @@ interface Room {
   next_availability: string | null;
 }
 
+function formatNextAvailability(dateString: string | null) {
+  if (!dateString) return 'Consultar disponibilidade';
+
+  const date = new Date(dateString);
+  const now = new Date();
+
+  const isToday = date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  const isTomorrow = new Date(now.setDate(now.getDate() + 1)).getDate() === date.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  const timeString = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  if (isToday) {
+    return `Hoje às ${timeString}h`;
+  } else if (isTomorrow) {
+    return `Amanhã às ${timeString}h`;
+  } else {
+    // Ex: "Segunda, 14/08 às 09:00"
+    const weekday = date.toLocaleDateString('pt-BR', { weekday: 'short' });
+    const dayMonth = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    // Capitalize first letter of weekday
+    const capWeekday = weekday.charAt(0).toUpperCase() + weekday.slice(1).replace('.', '');
+    return `${capWeekday}, ${dayMonth} às ${timeString}h`;
+  }
+}
+
 export default function Home() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
@@ -180,13 +210,17 @@ export default function Home() {
           <div className="rooms-grid">
             {rooms.map((room, index) => (
               <motion.div key={room.id} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.1 }} className="room-card" onClick={() => setSelectedRoom(room)}>
-                <div className="price-tag">A partir de R${room.hourly_rate}/hora</div>
-                <h3 style={{ marginTop: '12px', fontSize: '26px', fontWeight: 600 }}>{room.name}</h3>
-                <p style={{ marginTop: '8px', color: 'rgba(0,0,0,0.5)', fontSize: '15px' }}>{room.description}</p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '32px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <span style={{ fontSize: '11px', color: 'rgba(0,0,0,0.3)', fontWeight: 700, textTransform: 'uppercase' }}>Próxima disponibilidade</span>
-                    <span style={{ fontSize: '14px', color: '#34c759', fontWeight: 600 }}>{room.next_availability ? new Date(room.next_availability).toLocaleDateString('pt-BR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'Consultar'}</span>
+                <h3 className="room-card-title">{room.name}</h3>
+                <div className="price-tag">
+                  A partir de <strong>R${room.hourly_rate}</strong>/hora
+                </div>
+                <p className="room-card-description">{room.description}</p>
+                <div className="room-card-footer">
+                  <div className="room-card-availability">
+                    <span className="room-card-availability-label">Próxima disponibilidade</span>
+                    <span className="room-card-availability-value">
+                      {formatNextAvailability(room.next_availability)}
+                    </span>
                   </div>
                   <button className="primary-btn">Agendar</button>
                 </div>

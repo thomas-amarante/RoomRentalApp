@@ -72,25 +72,29 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     const storedUser = localStorage.getItem('roomrental_user');
     if (storedUser) {
-      const userData = JSON.parse(storedUser);
-      setUser(userData);
-
-      if (!userData.is_admin) {
-        router.push('/');
-        return;
-      }
-
-      setLoading(true);
       try {
+        const userData = JSON.parse(storedUser);
+        setUser(userData);
+
+        if (!userData.is_admin) {
+          router.push('/');
+          return;
+        }
+
+        setLoading(true);
+
         // Fetch Reservations
         const resRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/reservations`, {
           headers: { 'Authorization': `Bearer ${userData.token || ''}` }
         });
+        if (resRes.status === 401 || resRes.status === 403) throw new Error('unauthorized');
+        if (!resRes.ok) throw new Error('Failed to fetch reservations');
         const resData = await resRes.json();
         setReservations(resData);
 
         // Fetch Rooms
         const roomsRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/rooms`);
+        if (!roomsRes.ok) throw new Error('Failed to fetch rooms');
         const roomsData = await roomsRes.json();
         setRooms(roomsData);
 
@@ -98,10 +102,15 @@ export default function AdminDashboard() {
         const statsRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/stats/users`, {
           headers: { 'Authorization': `Bearer ${userData.token || ''}` }
         });
+        if (!statsRes.ok) throw new Error('Failed to fetch user stats');
         const statsData = await statsRes.json();
         setUserStats(statsData);
-      } catch (err) {
-        console.error(err);
+      } catch (err: any) {
+        console.error('Fetch error:', err);
+        if (err.message === 'unauthorized') {
+          localStorage.removeItem('roomrental_user');
+          router.push('/login');
+        }
       } finally {
         setLoading(false);
       }
@@ -231,14 +240,15 @@ export default function AdminDashboard() {
       </AnimatePresence>
 
       <main className="main-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingBottom: '100px' }}>
-        <section style={{ marginBottom: '40px', textAlign: 'center' }}>
+        <section style={{ marginBottom: '40px', textAlign: 'center', width: '100%', maxWidth: '100vw', overflow: 'hidden' }}>
           <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', marginBottom: '12px', color: 'black' }}>
             {activeTab === 'reservations' ? 'Controle de agendamento' : activeTab === 'rooms' ? 'Gerenciar Salas' : 'Estatísticas de Usuários'}
           </h1>
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', background: 'rgba(0,0,0,0.05)', padding: '6px', borderRadius: '12px' }}>
+          <div className="admin-tabs-container">
             <button
               onClick={() => setActiveTab('reservations')}
               style={{
+                flexShrink: 0,
                 padding: '10px 24px',
                 borderRadius: '10px',
                 border: 'none',
@@ -255,6 +265,7 @@ export default function AdminDashboard() {
             <button
               onClick={() => setActiveTab('rooms')}
               style={{
+                flexShrink: 0,
                 padding: '10px 24px',
                 borderRadius: '10px',
                 border: 'none',
@@ -271,6 +282,7 @@ export default function AdminDashboard() {
             <button
               onClick={() => setActiveTab('users')}
               style={{
+                flexShrink: 0,
                 padding: '10px 24px',
                 borderRadius: '10px',
                 border: 'none',
@@ -287,6 +299,7 @@ export default function AdminDashboard() {
             <Link
               href="/admin/debug"
               style={{
+                flexShrink: 0,
                 padding: '10px 24px',
                 borderRadius: '10px',
                 border: 'none',
@@ -393,8 +406,8 @@ export default function AdminDashboard() {
             {loading ? (
               <div style={{ textAlign: 'center', color: 'rgba(0,0,0,0.2)' }}>Carregando dados...</div>
             ) : (
-              <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflow: 'hidden', background: 'white', width: '100%' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
                       <th style={{ padding: '20px' }}>PROFISSIONAL</th>
@@ -511,28 +524,8 @@ export default function AdminDashboard() {
           </>
         ) : activeTab === 'rooms' ? (
           <div style={{ width: '100%' }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '24px' }}>
-              <button
-                onClick={() => handleOpenRoomModal()}
-                style={{
-                  background: 'black',
-                  color: 'white',
-                  border: 'none',
-                  padding: '12px 24px',
-                  borderRadius: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}
-              >
-                <span>+</span> Adicionar Nova Sala
-              </button>
-            </div>
-
-            <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflow: 'hidden', background: 'white', width: '100%' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
                     <th style={{ padding: '20px' }}>NOME DA SALA</th>
@@ -596,22 +589,22 @@ export default function AdminDashboard() {
         ) : (
           <div style={{ width: '100%' }}>
             {/* User Stats Summary Cards */}
-            <div style={{ display: 'flex', gap: '16px', marginBottom: '32px', width: '100%' }}>
-              <div style={{ flex: 1, background: 'white', padding: '24px', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px' }}>Total de Profissionais</div>
-                <div style={{ fontSize: '32px', fontWeight: 700 }}>{userStats.length}</div>
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '32px', width: '100%', flexWrap: 'wrap' }}>
+              <div className="metric-card metric-card-dark" style={{ flex: '1 1 45%' }}>
+                <div className="metric-title" style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '12px', zIndex: 1 }}>Total de Profissionais</div>
+                <div style={{ fontSize: '42px', fontWeight: 700, zIndex: 1, letterSpacing: '-0.02em' }}>{userStats.length}</div>
               </div>
-              <div style={{ flex: 1, background: 'white', padding: '24px', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px' }}>Faturamento Global</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: 'var(--accent)' }}>
+              <div className="metric-card metric-card-glass" style={{ flex: '1 1 45%' }}>
+                <div className="metric-title" style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: '8px' }}>Faturamento Global</div>
+                <div className="gradient-text" style={{ fontSize: '28px', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '-0.02em' }}>
                   R$ {userStats.reduce((acc, s) => acc + Number(s.total_revenue), 0).toFixed(2)}
                 </div>
               </div>
             </div>
 
-            <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '20px', letterSpacing: '-0.02em' }}>🏆 Ranking de Performance</h2>
+            <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '20px', letterSpacing: '-0.02em', textAlign: 'center' }}>🏆 Ranking de Performance</h2>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', marginBottom: '24px', textAlign: 'center' }}>
               <div style={{ color: 'rgba(0,0,0,0.5)', fontSize: '14px' }}>
                 Classificar profissionais por:
               </div>
@@ -641,8 +634,8 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflow: 'hidden', background: 'white', width: '100%' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
                     <th style={{ padding: '20px' }}>PROFISSIONAL</th>

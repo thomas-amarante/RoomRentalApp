@@ -39,8 +39,8 @@ h3 {
 
 .main-container {
   min-height: 100vh;
-  padding: 80px 0;
-  max-width: 1200px;
+  padding: 80px 20px;
+  max-width: 1240px;
   margin: 0 auto;
 }
 
@@ -204,42 +204,132 @@ header>a {
   .rooms-grid,
   .grid-3-col {
     grid-template-columns: 1fr;
+    padding: 0 16px;
   }
 }
 
 .room-card {
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 24px;
-  transition: all 0.3s ease;
+  position: relative;
+  background: rgba(255, 255, 255, 0.6);
+  /* Fundo branco e translúcido */
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  /* Borda fina e suave */
+  border-radius: 20px;
+  padding: 28px;
+  color: #1a1a1a;
+  /* Texto bem escuro */
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  /* Sombra mais difusa e leve */
+}
+
+/* Pseudo-elemento para o glow de fundo suave */
+.room-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at center, rgba(0, 113, 227, 0.03) 0%, rgba(0, 0, 0, 0) 50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
 }
 
 .room-card:hover {
-  border-color: var(--accent);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 113, 227, 0.3);
+  /* Accent apple blue highlight */
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.08), 0 0 24px rgba(0, 113, 227, 0.05) inset;
+  transform: translateY(-4px);
+}
+
+.room-card:hover::before {
+  opacity: 1;
+}
+
+.room-card-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #1d1d1f;
+  /* Cor principal de texto Apple clara */
+  letter-spacing: -0.02em;
 }
 
 .price-tag {
-  font-size: 12px;
-  text-transform: uppercase;
-  color: var(--accent);
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  /* Borda clarinha separator */
+  padding-bottom: 16px;
+}
+
+.price-tag strong {
+  font-size: 24px;
+  color: #1d1d1f;
+  font-weight: 700;
+}
+
+.room-card-description {
+  font-size: 15px;
+  line-height: 1.5;
+  color: rgba(0, 0, 0, 0.6);
+  /* Cinza escuro para ótima leitura */
+  margin-bottom: 32px;
+}
+
+.room-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.room-card-availability {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.room-card-availability-label {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.4);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.room-card-availability-value {
+  font-size: 15px;
+  color: #0071e3;
+  /* Accent Blue do estilo geral da página */
+  font-weight: 600;
 }
 
 button.primary-btn {
-  background: var(--accent);
-  color: white;
+  background: #1d1d1f;
+  /* Botão pretinho luxo, contrastante */
+  color: #ffffff;
   border: none;
-  padding: 10px 20px;
+  padding: 10px 24px;
   border-radius: 980px;
-  /* Estilo pílula Apple */
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: all 0.3s ease;
+}
+
+button.primary-btn:hover {
+  background: #333336;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  transform: scale(1.02);
 }
 
 /* Modal Overlay Light */
@@ -366,4 +456,94 @@ button.primary-btn {
 
 .whatsapp-float:hover {
   transform: scale(1.1);
+}
+
+/* Admin Tabs Horizontal Scroll for Mobile */
+.admin-tabs-container {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 6px;
+  border-radius: 14px;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  /* Firefox */
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  width: 100%;
+  max-width: 100%;
+}
+
+.admin-tabs-container::-webkit-scrollbar {
+  display: none;
+  /* Chrome, Safari and Opera */
+}
+
+@media (min-width: 768px) {
+  .admin-tabs-container {
+    justify-content: center;
+    width: fit-content;
+    margin: 0 auto;
+  }
+}
+
+/* Modern Metric Cards */
+.metric-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  border-radius: 24px;
+  padding: 24px;
+}
+
+.metric-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+}
+
+.metric-card-dark {
+  background: linear-gradient(135deg, #18181b 0%, #09090b 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+.metric-card-dark .metric-title {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.metric-card-dark::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -50px;
+  width: 100px;
+  height: 100px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 70%);
+  border-radius: 50%;
+}
+
+.metric-card-glass {
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+}
+
+.metric-card-glass .metric-title {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
 }

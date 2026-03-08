@@ -49,6 +49,9 @@ export default function AdminDebug() {
     const [editingEntity, setEditingEntity] = useState<any>(null);
     const [editType, setEditType] = useState<'user' | 'room' | 'reservation' | null>(null);
 
+    // Filter
+    const [searchUser, setSearchUser] = useState('');
+
     const fetchData = async () => {
         const storedUser = localStorage.getItem('roomrental_user');
         if (!storedUser) {
@@ -69,14 +72,22 @@ export default function AdminDebug() {
             const headers = { 'Authorization': `Bearer ${userData.token || ''}` };
 
             const usersRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/users`, { headers });
+            if (usersRes.status === 401 || usersRes.status === 403) throw new Error('unauthorized');
+
             const roomsRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/rooms`);
             const reservationsRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/reservations`, { headers });
+
+            if (!usersRes.ok || !roomsRes.ok || !reservationsRes.ok) throw new Error('Failed to fetch debug data');
 
             setUsers(await usersRes.json());
             setRooms(await roomsRes.json());
             setReservations(await reservationsRes.json());
-        } catch (err) {
-            console.error(err);
+        } catch (err: any) {
+            console.error('Fetch error:', err);
+            if (err.message === 'unauthorized') {
+                localStorage.removeItem('roomrental_user');
+                router.push('/login');
+            }
         } finally {
             setLoading(false);
         }
@@ -142,12 +153,12 @@ export default function AdminDebug() {
         <div style={{ background: '#fcfcfc', minHeight: '100vh', padding: '40px' }}>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                    <Link href="/admin" style={{ textDecoration: 'none', color: 'rgba(0,0,0,0.4)', fontWeight: 600 }}>← Voltar ao Admin</Link>
-                    <h1 style={{ fontSize: '32px', fontWeight: 800, letterSpacing: '-0.04em' }}>Painel Debug (Dados Crus)</h1>
+                    <Link href="/admin" style={{ textDecoration: 'none', color: 'rgba(0,0,0,0.4)', fontWeight: 600 }}>← Voltar</Link>
+                    <h1 style={{ fontSize: '32px', fontWeight: 800, letterSpacing: '-0.04em' }}>Painel Debug</h1>
                 </div>
             </header>
 
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '32px', background: 'rgba(0,0,0,0.05)', padding: '6px', borderRadius: '12px', width: 'fit-content' }}>
+            <div className="admin-tabs-container" style={{ marginTop: '20px', marginBottom: '32px', width: 'fit-content' }}>
                 {(['users', 'rooms', 'reservations'] as const).map(tab => (
                     <button
                         key={tab}
@@ -167,72 +178,93 @@ export default function AdminDebug() {
             {loading ? (
                 <div style={{ textAlign: 'center', color: 'rgba(0,0,0,0.2)', padding: '100px' }}>Carregando dados estruturais...</div>
             ) : (
-                <div style={{ border: '1px solid var(--border)', borderRadius: '24px', overflow: 'hidden', background: 'white' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                        <thead style={{ background: '#f9f9f9', borderBottom: '1px solid #eee' }}>
-                            <tr>
-                                <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DADOS</th>
-                                <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DETALHES</th>
-                                <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)', textAlign: 'right' }}>AÇÕES</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {activeTab === 'users' && users.map(u => (
-                                <tr key={u.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                                    <td style={{ padding: '20px' }}>
-                                        <div style={{ fontWeight: 700 }}>{u.name}</div>
-                                        <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{u.id}</div>
-                                    </td>
-                                    <td style={{ padding: '20px' }}>
-                                        <div style={{ fontSize: '14px' }}>{u.email}</div>
-                                        <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.6)', marginTop: '2px' }}>Tel: {u.phone || 'N/A'}</div>
-                                        <div style={{ fontSize: '11px', background: u.is_admin ? '#000' : '#eee', color: u.is_admin ? '#fff' : '#666', padding: '2px 8px', borderRadius: '100px', display: 'inline-block', marginTop: '4px' }}>
-                                            {u.is_admin ? 'ADMIN' : 'USER'}
-                                        </div>
-                                    </td>
-                                    <td style={{ padding: '20px', textAlign: 'right' }}>
-                                        <button onClick={() => handleEdit(u, 'user')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
-                                        <button onClick={() => handleDelete(u.id, 'users')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
-                                    </td>
-                                </tr>
-                            ))}
+                <>
+                    {activeTab === 'users' && (
+                        <div style={{ marginBottom: '24px' }}>
+                            <input
+                                type="text"
+                                placeholder="🔍 Buscar usuário por nome, e-mail ou telefone..."
+                                className="input-field"
+                                value={searchUser}
+                                onChange={(e) => setSearchUser(e.target.value)}
+                                style={{ maxWidth: '400px', background: 'white', border: '1px solid var(--border)' }}
+                            />
+                        </div>
+                    )}
 
-                            {activeTab === 'rooms' && rooms.map(r => (
-                                <tr key={r.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                                    <td style={{ padding: '20px' }}>
-                                        <div style={{ fontWeight: 700 }}>{r.name}</div>
-                                        <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{r.id}</div>
-                                    </td>
-                                    <td style={{ padding: '20px' }}>
-                                        <div style={{ fontSize: '14px' }}>Hora: R${r.hourly_rate} | Turno: R${r.shift_rate}</div>
-                                        <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.5)' }}>Capacidade: {r.capacity}</div>
-                                    </td>
-                                    <td style={{ padding: '20px', textAlign: 'right' }}>
-                                        <button onClick={() => handleEdit(r, 'room')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
-                                        <button onClick={() => handleDelete(r.id, 'rooms')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
-                                    </td>
+                    <div style={{ border: '1px solid var(--border)', borderRadius: '24px', overflowX: 'auto', background: 'white', width: '100%' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
+                            <thead style={{ background: '#f9f9f9', borderBottom: '1px solid #eee' }}>
+                                <tr>
+                                    <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DADOS</th>
+                                    <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DETALHES</th>
+                                    <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)', textAlign: 'right' }}>AÇÕES</th>
                                 </tr>
-                            ))}
+                            </thead>
+                            <tbody>
+                                {activeTab === 'users' && users
+                                    .filter(u =>
+                                        u.name.toLowerCase().includes(searchUser.toLowerCase()) ||
+                                        u.email.toLowerCase().includes(searchUser.toLowerCase()) ||
+                                        (u.phone && u.phone.includes(searchUser))
+                                    )
+                                    .map(u => (
+                                        <tr key={u.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                                            <td style={{ padding: '20px' }}>
+                                                <div style={{ fontWeight: 700 }}>{u.name}</div>
+                                                <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{u.id}</div>
+                                            </td>
+                                            <td style={{ padding: '20px' }}>
+                                                <div style={{ fontSize: '14px' }}>{u.email}</div>
+                                                <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.6)', marginTop: '2px' }}>Tel: {u.phone || 'N/A'}</div>
+                                                <div style={{ fontSize: '11px', background: u.is_admin ? '#000' : '#eee', color: u.is_admin ? '#fff' : '#666', padding: '2px 8px', borderRadius: '100px', display: 'inline-block', marginTop: '4px' }}>
+                                                    {u.is_admin ? 'ADMIN' : 'USER'}
+                                                </div>
+                                            </td>
+                                            <td style={{ padding: '20px', textAlign: 'right' }}>
+                                                <button onClick={() => handleEdit(u, 'user')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
+                                                <button onClick={() => handleDelete(u.id, 'users')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
+                                            </td>
+                                        </tr>
+                                    ))}
 
-                            {activeTab === 'reservations' && reservations.map(res => (
-                                <tr key={res.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                                    <td style={{ padding: '20px' }}>
-                                        <div style={{ fontWeight: 700 }}>Sala: {res.room_name || res.room_id}</div>
-                                        <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{res.id}</div>
-                                    </td>
-                                    <td style={{ padding: '20px' }}>
-                                        <div style={{ fontSize: '13px' }}>Usuário: {res.user_name || res.user_id}</div>
-                                        <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.5)' }}>Status: {res.status.toUpperCase()} | R${res.total_price}</div>
-                                    </td>
-                                    <td style={{ padding: '20px', textAlign: 'right' }}>
-                                        <button onClick={() => handleEdit(res, 'reservation')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
-                                        <button onClick={() => handleDelete(res.id, 'reservations')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                                {activeTab === 'rooms' && rooms.map(r => (
+                                    <tr key={r.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                                        <td style={{ padding: '20px' }}>
+                                            <div style={{ fontWeight: 700 }}>{r.name}</div>
+                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{r.id}</div>
+                                        </td>
+                                        <td style={{ padding: '20px' }}>
+                                            <div style={{ fontSize: '14px' }}>Hora: R${r.hourly_rate} | Turno: R${r.shift_rate}</div>
+                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.5)' }}>Capacidade: {r.capacity}</div>
+                                        </td>
+                                        <td style={{ padding: '20px', textAlign: 'right' }}>
+                                            <button onClick={() => handleEdit(r, 'room')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
+                                            <button onClick={() => handleDelete(r.id, 'rooms')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
+                                        </td>
+                                    </tr>
+                                ))}
+
+                                {activeTab === 'reservations' && reservations.map(res => (
+                                    <tr key={res.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                                        <td style={{ padding: '20px' }}>
+                                            <div style={{ fontWeight: 700 }}>Sala: {res.room_name || res.room_id}</div>
+                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{res.id}</div>
+                                        </td>
+                                        <td style={{ padding: '20px' }}>
+                                            <div style={{ fontSize: '13px' }}>Usuário: {res.user_name || res.user_id}</div>
+                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.5)' }}>Status: {res.status.toUpperCase()} | R${res.total_price}</div>
+                                        </td>
+                                        <td style={{ padding: '20px', textAlign: 'right' }}>
+                                            <button onClick={() => handleEdit(res, 'reservation')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
+                                            <button onClick={() => handleDelete(res.id, 'reservations')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
             )}
 
             {/* EDIT MODAL */}
