@@ -39,6 +39,8 @@ CREATE TABLE reservations (
     -- CONSTRAINT CRÍTICA: Impede que a mesma sala tenha reservas sobrepostas
     EXCLUDE USING GIST (room_id WITH =, booking_period WITH &&),
     
+    payment_reminder_sent BOOLEAN DEFAULT FALSE,
+    cancellation_notice_sent BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

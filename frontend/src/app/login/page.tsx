@@ -11,6 +11,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('+55 ');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,7 @@ export default function Login() {
     const endpoint = mode === 'login' ? '/api/auth/login' :
       mode === 'register' ? '/api/auth/register' : '/api/auth/forgot-password';
 
-    const body = mode === 'register' ? { name, email, password } :
+    const body = mode === 'register' ? { name, email, password, phone: phone.replace(/\D/g, '') } :
       mode === 'login' ? { email, password } : { email };
 
     try {
@@ -42,7 +43,11 @@ export default function Login() {
           setMessage(data.message);
         } else {
           localStorage.setItem('roomrental_user', JSON.stringify({ ...data.user, token: data.token }));
-          router.push('/');
+          if (mode === 'register' || !data.user.is_phone_verified) {
+            router.push('/verify');
+          } else {
+            router.push('/');
+          }
         }
       } else {
         setError(data.error || 'Erro na operação');
@@ -107,14 +112,59 @@ export default function Login() {
                 </div>
               )}
 
+              {mode === 'register' && (
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Celular (com DDD)</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="+55 (XX) XXXXX-XXXX"
+                    value={phone}
+                    onChange={(e) => {
+                      let val = e.target.value;
+                      // Manter o +55 fixo
+                      if (!val.startsWith('+55 ')) val = '+55 ';
+
+                      // Extrair apenas os números após o +55
+                      const numbers = val.slice(4).replace(/\D/g, '').slice(0, 11);
+
+                      // Aplicar Máscara: +55 (XX) XXXXX-XXXX
+                      let formatted = '+55 ';
+                      if (numbers.length > 0) {
+                        formatted += '(' + numbers.slice(0, 2);
+                        if (numbers.length > 2) {
+                          formatted += ') ' + numbers.slice(2, 7);
+                          if (numbers.length > 7) {
+                            formatted += '-' + numbers.slice(7);
+                          }
+                        }
+                      }
+                      setPhone(formatted);
+                    }}
+                    required
+                  />
+                  <div style={{ fontSize: '10px', color: 'rgba(0,0,0,0.3)', marginTop: '4px' }}>
+                    Mínimo de 11 números (ex: 11 98888-7777)
+                  </div>
+                </div>
+              )}
+
               {error && <p style={{ color: '#ff3b30', fontSize: '13px', marginBottom: '16px', fontWeight: 500 }}>{error}</p>}
               {message && <p style={{ color: '#34c759', fontSize: '13px', marginBottom: '16px', fontWeight: 500 }}>{message}</p>}
 
               <button
                 type="submit"
                 className="primary-btn"
-                disabled={loading}
-                style={{ width: '100%', padding: '16px', fontSize: '16px', fontWeight: 600, marginTop: '8px' }}
+                disabled={loading || (mode === 'register' && phone.replace(/\D/g, '').length < 11)}
+                style={{
+                  width: '100%',
+                  padding: '16px',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  marginTop: '8px',
+                  opacity: (mode === 'register' && phone.replace(/\D/g, '').length < 11) ? 0.5 : 1,
+                  cursor: (mode === 'register' && phone.replace(/\D/g, '').length < 11) ? 'not-allowed' : 'pointer'
+                }}
               >
                 {loading ? 'Aguarde...' : (mode === 'login' ? 'Entrar' : mode === 'register' ? 'Criar Conta' : 'Enviar Link')}
               </button>

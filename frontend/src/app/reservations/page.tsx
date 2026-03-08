@@ -13,6 +13,7 @@ interface Reservation {
   booking_period: string;
   status: string;
   total_price: number;
+  created_at: string;
 }
 
 export default function Reservations() {
@@ -20,12 +21,24 @@ export default function Reservations() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
+  const [nowUTC, setNowUTC] = useState(new Date());
   const router = useRouter();
+
+  // Atualiza o relógio a cada 1 segundo para o countdown preciso
+  useEffect(() => {
+    const timer = setInterval(() => setNowUTC(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('roomrental_user');
     if (storedUser) {
       const userData = JSON.parse(storedUser);
+      if (!userData.is_phone_verified && !userData.is_admin) {
+        router.push('/verify');
+        return;
+      }
       setUser(userData);
       fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/reservations/${userData.id}`, {
         headers: {
@@ -43,6 +56,37 @@ export default function Reservations() {
       router.push('/login');
     }
   }, [router]);
+
+  const handlePayment = async (reservation: Reservation) => {
+    setPaymentLoading(reservation.id);
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/payments/create-preference`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          reservation_id: reservation.id,
+          title: `Reserva: ${reservation.room_name}`,
+          unit_price: reservation.total_price,
+          quantity: 1
+        })
+      });
+
+      const data = await response.json();
+      if (data.init_point) {
+        window.location.href = data.init_point;
+      } else {
+        alert('Erro ao iniciar pagamento. Tente novamente.');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Erro de conexão com o servidor de pagamentos.');
+    } finally {
+      setPaymentLoading(null);
+    }
+  };
 
   return (
     <>
@@ -116,38 +160,53 @@ export default function Reservations() {
                 flexDirection: 'column',
                 transition: 'transform 0.3s ease',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-                width: '100%'
+                width: '100%',
+                opacity: res.status === 'confirmed' ? 1 : 0.8
               }}>
                 {/* Cabeçalho do Ticket */}
                 <div style={{ padding: '24px', borderBottom: '1px dashed var(--border)', position: 'relative' }}>
                   <div style={{
                     fontSize: '11px',
-                    color: res.status === 'confirmed' ? 'var(--accent)' : '#ff3b30',
+                    color: res.status === 'confirmed' ? 'var(--accent)' : (res.status === 'pending' ? '#ff9500' : '#ff3b30'),
                     fontWeight: 700,
                     textTransform: 'uppercase',
                     marginBottom: '8px',
                     letterSpacing: '0.05em'
                   }}>
-                    {res.status === 'confirmed' ? '✓ AGENDAMENTO VÁLIDO' : '● EXPIRADO/CANCELADO'}
+                    {(() => {
+                      if (res.status === 'confirmed') return '✓ AGENDAMENTO VÁLIDO';
+                      if (res.status === 'pending') {
+                        const created = new Date(res.created_at);
+                        const diffMs = nowUTC.getTime() - created.getTime();
+                        const diffSecs = Math.floor(diffMs / 1000);
+                        const remainingSecs = (20 * 60) - diffSecs;
+
+                        if (remainingSecs <= 0) return '● RESERVA CANCELADA (TEMPO ESGOTADO)';
+
+                        const mins = Math.floor(remainingSecs / 60);
+                        const secs = remainingSecs % 60;
+                        return `⌛ PAGAR EM ${mins}:${secs < 10 ? '0' : ''}${secs}`;
+                      }
+                      return '● AGENDAMENTO CANCELADO';
+                    })()}
                   </div>
                   <h3 style={{
                     fontSize: '22px',
                     fontWeight: 700,
-                    color: res.status === 'confirmed' ? 'black' : 'rgba(0,0,0,0.3)',
+                    color: res.status !== 'cancelled' ? 'black' : 'rgba(0,0,0,0.3)',
                     marginBottom: '4px',
-                    textDecoration: res.status === 'confirmed' ? 'none' : 'line-through'
+                    textDecoration: res.status !== 'cancelled' ? 'none' : 'line-through'
                   }}>
                     {res.room_name}
                   </h3>
                   <div style={{
-                    color: res.status === 'confirmed' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.3)',
+                    color: res.status !== 'cancelled' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.3)',
                     fontSize: '13px',
                     fontWeight: 500,
-                    textDecoration: res.status === 'confirmed' ? 'none' : 'line-through'
+                    textDecoration: res.status !== 'cancelled' ? 'none' : 'line-through'
                   }} className="mono">
                     {(() => {
                       try {
-                        // Exemplo de formato vindo do banco (Postgres TSRANGE): "[\"2026-03-03 09:00:00\",\"2026-03-03 10:00:00\")"
                         const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
                         const [start, end] = cleanStr.split(',');
                         if (!start || !end) return cleanStr;
@@ -173,7 +232,7 @@ export default function Reservations() {
 
                 {/* Corpo do Ticket com QR Code */}
                 <div style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '10px', color: 'rgba(0,0,0,0.3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Identificador</div>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: 'black' }} className="mono">
                       {res.id.split('-')[0].toUpperCase()}
@@ -194,12 +253,35 @@ export default function Reservations() {
                     alignItems: 'center',
                     justifyContent: 'center'
                   }}>
-                    <QRCodeSVG
-                      value={`${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/lookup/${res.id}`}
-                      size={80}
-                      level="M"
-                      includeMargin={false}
-                    />
+                    {res.status === 'confirmed' ? (
+                      <QRCodeSVG
+                        value={`${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/lookup/${res.id}`}
+                        size={80}
+                        level="M"
+                        includeMargin={false}
+                      />
+                    ) : (res.status === 'pending' && (20 * 60 - Math.floor((nowUTC.getTime() - new Date(res.created_at).getTime()) / 1000)) > 0) ? (
+                      <button
+                        onClick={() => handlePayment(res)}
+                        disabled={paymentLoading === res.id}
+                        style={{
+                          background: 'black',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '12px',
+                          padding: '12px 16px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          transition: 'opacity 0.2s',
+                          opacity: paymentLoading === res.id ? 0.7 : 1
+                        }}
+                      >
+                        {paymentLoading === res.id ? 'Carregando...' : 'Pagar Agora'}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: '32px', filter: 'grayscale(1)' }}>🔒</span>
+                    )}
                   </div>
                 </div>
               </div>

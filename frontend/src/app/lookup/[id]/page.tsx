@@ -99,13 +99,13 @@ export default function LookupPage() {
                 }}>
                     {/* Status Banner */}
                     <div style={{
-                        background: isConfirmed ? '#34c759' : '#ff3b30',
+                        background: isConfirmed ? '#34c759' : (reservation.status === 'pending' ? '#ff9500' : '#ff3b30'),
                         padding: '16px 24px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '10px'
                     }}>
-                        <span style={{ fontSize: '22px' }}>{isConfirmed ? '✓' : '✕'}</span>
+                        <span style={{ fontSize: '22px' }}>{isConfirmed ? '✓' : (reservation.status === 'pending' ? '⌛' : '✕')}</span>
                         <span style={{
                             color: 'white',
                             fontWeight: 700,
@@ -113,7 +113,7 @@ export default function LookupPage() {
                             textTransform: 'uppercase',
                             letterSpacing: '0.08em'
                         }}>
-                            {isConfirmed ? 'Agendamento Válido' : 'Agendamento Cancelado'}
+                            {isConfirmed ? 'Agendamento Válido' : (reservation.status === 'pending' ? 'Aguardando Pagamento' : 'Agendamento Cancelado')}
                         </span>
                     </div>
 

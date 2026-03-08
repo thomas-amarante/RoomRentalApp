@@ -54,7 +54,12 @@ export default function Home() {
     if (!storedUser) {
       router.push('/login');
     } else {
-      setUser(JSON.parse(storedUser));
+      const userData = JSON.parse(storedUser);
+      if (!userData.is_phone_verified && !userData.is_admin) {
+        router.push('/verify');
+        return;
+      }
+      setUser(userData);
       fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/rooms`)
         .then(res => res.json())
         .then(data => setRooms(data))
@@ -104,7 +109,9 @@ export default function Home() {
 
       if (response.ok) {
         setBookingSuccess(true);
-        setTimeout(() => setSelectedRoom(null), 2000);
+        setTimeout(() => {
+          router.push('/reservations');
+        }, 1500);
       } else {
         const data = await response.json();
         alert(data.error || 'Erro ao agendar');
@@ -190,13 +197,13 @@ export default function Home() {
 
         <AnimatePresence>
           {selectedRoom && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="modal-overlay" onClick={() => !isBooking && setSelectedRoom(null)}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="modal-overlay" onClick={() => !isBooking && (setSelectedRoom(null), setBookingSuccess(false))}>
               <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="modal-content" onClick={(e) => e.stopPropagation()}>
                 {bookingSuccess ? (
                   <div style={{ textAlign: 'center', padding: '20px' }}>
                     <div style={{ fontSize: '64px', marginBottom: '20px', color: '#34c759' }}>✓</div>
                     <h2 style={{ fontSize: '28px', marginBottom: '8px' }}>Agendado com sucesso!</h2>
-                    <p style={{ color: 'rgba(0,0,0,0.4)' }}>Sua sala está pronta para o atendimento.</p>
+                    <p style={{ color: 'rgba(0,0,0,0.4)' }}>Redirecionando para suas reservas...</p>
                   </div>
                 ) : (
                   <>
@@ -251,7 +258,7 @@ export default function Home() {
                     </div>
                   </>
                 )}
-                <button onClick={() => setSelectedRoom(null)} style={{ position: 'absolute', top: '24px', right: '24px', background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', opacity: 0.2 }}>✕</button>
+                <button onClick={() => { setSelectedRoom(null); setBookingSuccess(false); }} style={{ position: 'absolute', top: '24px', right: '24px', background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', opacity: 0.2 }}>✕</button>
               </motion.div>
             </motion.div>
           )}

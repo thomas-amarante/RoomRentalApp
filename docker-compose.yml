@@ -20,6 +20,30 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─── 4. Evolution API (WhatsApp) ──────────────────────────────────────────
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    container_name: roomrentalapp-evolution-1
+    restart: unless-stopped
+    environment:
+      # Configurações básicas do servidor
+      - SERVER_TYPE=http
+      - SERVER_PORT=8080
+      - AUTHENTICATION_API_KEY=LIV_DEBUG_TOKEN_2026
+      # Banco de dados para persistência (Postgres)
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgres://postgres:${POSTGRES_PASSWORD}@localhost:5432/evolution_api
+      # Cache e Redis (Desabilitado para evitar erros locais)
+      - CACHE_REDIS_ENABLED=false
+      - CACHE_LOCAL_ENABLED=true
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    network_mode: "host"
+
   # ─── 2. Backend (Node.js / Express) ────────────────────────────────────────
   backend:
     build:
@@ -31,6 +55,11 @@ services:
       PORT: 3001
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@localhost:5432/room_rental
       JWT_SECRET: ${JWT_SECRET}
+      MERCADO_PAGO_ACCESS_TOKEN: ${MERCADO_PAGO_ACCESS_TOKEN}
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE}
+      FRONTEND_URL: ${NEXT_PUBLIC_APP_URL}
     # ports:
     #   - "3001:3001"
     depends_on:
