@@ -12,6 +12,9 @@ export default function Login() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('+55 ');
+  const [cpf, setCpf] = useState('');
+  const [cro, setCro] = useState('');
+  const [address, setAddress] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,7 +29,7 @@ export default function Login() {
     const endpoint = mode === 'login' ? '/api/auth/login' :
       mode === 'register' ? '/api/auth/register' : '/api/auth/forgot-password';
 
-    const body = mode === 'register' ? { name, email, password, phone: phone.replace(/\D/g, '') } :
+    const body = mode === 'register' ? { name, email, password, phone: phone.replace(/\D/g, ''), cpf: cpf.replace(/\D/g, ''), cro, address } :
       mode === 'login' ? { email, password } : { email };
 
     try {
@@ -94,10 +97,37 @@ export default function Login() {
 
             <form onSubmit={handleSubmit} style={{ textAlign: 'left' }}>
               {mode === 'register' && (
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Nome Completo</label>
-                  <input type="text" className="input-field" value={name} onChange={(e) => setName(e.target.value)} required />
-                </div>
+                <>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Nome Completo</label>
+                    <input type="text" className="input-field" value={name} onChange={(e) => setName(e.target.value)} required />
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>CPF</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="000.000.000-00"
+                      value={cpf}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/\D/g, '').slice(0, 11);
+                        if (val.length > 9) val = val.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
+                        else if (val.length > 6) val = val.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
+                        else if (val.length > 3) val = val.replace(/(\d{3})(\d{1,3})/, "$1.$2");
+                        setCpf(val);
+                      }}
+                      required
+                    />
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>CRO (Opcional)</label>
+                    <input type="text" className="input-field" placeholder="Ex: 12345/SP" value={cro} onChange={(e) => setCro(e.target.value)} />
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Endereço Completo</label>
+                    <input type="text" className="input-field" placeholder="Rua, Número, Bairro - Cidade/UF" value={address} onChange={(e) => setAddress(e.target.value)} required />
+                  </div>
+                </>
               )}
 
               <div style={{ marginBottom: '12px' }}>
@@ -155,15 +185,15 @@ export default function Login() {
               <button
                 type="submit"
                 className="primary-btn"
-                disabled={loading || (mode === 'register' && phone.replace(/\D/g, '').length < 11)}
+                disabled={loading || (mode === 'register' && (phone.replace(/\D/g, '').length < 11 || cpf.replace(/\D/g, '').length < 11))}
                 style={{
                   width: '100%',
                   padding: '16px',
                   fontSize: '16px',
                   fontWeight: 600,
                   marginTop: '8px',
-                  opacity: (mode === 'register' && phone.replace(/\D/g, '').length < 11) ? 0.5 : 1,
-                  cursor: (mode === 'register' && phone.replace(/\D/g, '').length < 11) ? 'not-allowed' : 'pointer'
+                  opacity: (mode === 'register' && (phone.replace(/\D/g, '').length < 11 || cpf.replace(/\D/g, '').length < 11)) ? 0.5 : 1,
+                  cursor: (mode === 'register' && (phone.replace(/\D/g, '').length < 11 || cpf.replace(/\D/g, '').length < 11)) ? 'not-allowed' : 'pointer'
                 }}
               >
                 {loading ? 'Aguarde...' : (mode === 'login' ? 'Entrar' : mode === 'register' ? 'Criar Conta' : 'Enviar Link')}

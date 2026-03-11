@@ -116,6 +116,29 @@ export default function AdminDebug() {
         }
     };
 
+    const handleToggleAdmin = async (user: DebugUser) => {
+        if (!confirm(`Deseja realmente ${user.is_admin ? 'REMOVER' : 'CONCEDER'} permissões de administrador para ${user.name}?`)) return;
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/users/${user.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${adminUser.token || ''}`
+                },
+                body: JSON.stringify({ ...user, is_admin: !user.is_admin })
+            });
+
+            if (res.ok) {
+                fetchData();
+            } else {
+                alert('Erro ao atualizar permissões.');
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
     const handleEdit = (entity: any, type: 'user' | 'room' | 'reservation') => {
         setEditingEntity({ ...entity });
         setEditType(type);
@@ -222,6 +245,9 @@ export default function AdminDebug() {
                                                 </div>
                                             </td>
                                             <td style={{ padding: '20px', textAlign: 'right' }}>
+                                                <button onClick={() => handleToggleAdmin(u)} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: u.is_admin ? 'orange' : 'green', fontSize: '12px', fontWeight: 600 }}>
+                                                    {u.is_admin ? 'Remover Admin' : 'Tornar Admin'}
+                                                </button>
                                                 <button onClick={() => handleEdit(u, 'user')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
                                                 <button onClick={() => handleDelete(u.id, 'users')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
                                             </td>

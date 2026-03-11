@@ -8,6 +8,7 @@ CREATE TABLE users (
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    cpf VARCHAR(20) UNIQUE,
     is_admin BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -20,6 +21,17 @@ CREATE TABLE rooms (
     hourly_rate DECIMAL(10, 2) NOT NULL, -- Valor por 1 hora
     shift_rate DECIMAL(10, 2) NOT NULL,  -- Valor por 4 horas (turno)
     capacity INTEGER NOT NULL,
+    locked_by_default BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Tabela de Liberações Manuais (Salas Bloqueadas)
+CREATE TABLE released_slots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -52,4 +64,13 @@ CREATE TABLE payments (
     payment_status VARCHAR(50), -- succeeded, processing, failed
     amount_paid DECIMAL(10, 2),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Tabela de Inventário de Pacotes (Tickets Associados a Salas Múltiplas)
+CREATE TABLE user_tickets (
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
+    hourly_tickets INTEGER DEFAULT 0,
+    shift_tickets INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, room_id)
 );

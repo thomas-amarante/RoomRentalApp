@@ -6,7 +6,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { authenticateToken, requireAdmin, AuthRequest } from './middleware/auth';
-import { MercadoPagoConfig, Preference } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
 
 dotenv.config();
 
@@ -39,42 +39,64 @@ const client = new MercadoPagoConfig({
 app.get('/api/rooms', async (req: Request, res: Response) => {
   try {
     const query = `
-      WITH hourly_slots AS (
+      WITH RECURSIVE days AS (
+        SELECT (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AS d
+        UNION ALL
+        SELECT d + 1 FROM days WHERE d < (NOW() AT TIME ZONE 'America/Sao_Paulo')::date + 15
+      ),
+      all_possible_blocks AS (
+        -- Standard 1h slots for normal rooms
         SELECT 
           r.id AS room_id,
-          -- Gera slots de hora em hora para os próximos 15 dias
-          generate_series(
-            date_trunc('hour', NOW() AT TIME ZONE 'America/Sao_Paulo') + interval '1 hour', 
-            (NOW() AT TIME ZONE 'America/Sao_Paulo')::date + interval '15 days', 
-            '1 hour'::interval
-          ) AS slot_start
-        FROM rooms r
-      ),
-      valid_slots AS (
+          (d.d + (h.h || ' hours')::interval) AS start_time,
+          (d.d + ((h.h + 1) || ' hours')::interval) AS end_time
+        FROM days d
+        CROSS JOIN generate_series(7, 22) h(h)
+        CROSS JOIN rooms r
+        WHERE r.locked_by_default = false
+
+        UNION ALL
+
+        -- Released slots by Admin
         SELECT 
-          hs.room_id, 
-          hs.slot_start,
-          hs.slot_start + interval '1 hour' AS slot_end
-        FROM hourly_slots hs
-        -- Filtra apenas horário comercial: entre 08:00 e 18:00 (última sala encerra 19h)
-        WHERE EXTRACT(HOUR FROM hs.slot_start) >= 8 
-          AND EXTRACT(HOUR FROM hs.slot_start) <= 18
-      ),
-      available_slots AS (
+          rs.room_id,
+          (rs.date + rs.start_time) AS start_time,
+          (rs.date + rs.end_time) AS end_time
+        FROM released_slots rs
+
+        UNION ALL
+
+        -- Business Rule: Carina fixed Mondays 07:00 - 13:30
         SELECT 
-          vs.room_id, 
-          vs.slot_start
-        FROM valid_slots vs
+          '0b5d4bf5-b66b-43bf-9575-0ca9925251f4'::uuid AS room_id,
+          (d.d + interval '7 hours') AS start_time,
+          (d.d + interval '13 hours 30 minutes') AS end_time
+        FROM days d
+        WHERE EXTRACT(ISODOW FROM d.d) = 1
+
+        UNION ALL
+
+        -- Business Rule: Carina fixed Wed/Fri 13:30 - 22:00
+        SELECT 
+          '0b5d4bf5-b66b-43bf-9575-0ca9925251f4'::uuid AS room_id,
+          (d.d + interval '13 hours 30 minutes') AS start_time,
+          (d.d + interval '22 hours') AS end_time
+        FROM days d
+        WHERE EXTRACT(ISODOW FROM d.d) IN (3, 5)
+      ),
+      available_blocks AS (
+        SELECT p.room_id, p.start_time
+        FROM all_possible_blocks p
         LEFT JOIN reservations res 
-          ON res.room_id = vs.room_id 
+          ON res.room_id = p.room_id 
           AND res.status != 'cancelled'
-          -- Checa se o slot gerado colide com algum período existente no banco usando TSRANGE
-          AND tsrange(vs.slot_start, vs.slot_end) && res.booking_period
-        WHERE res.id IS NULL -- Só mantém slots on não rolou JOIN com nenhuma reserva
+          AND tsrange(p.start_time, p.end_time) && res.booking_period
+        -- Only consider slots that are AT LEAST 30 mins in the future to avoid false hopes
+        WHERE res.id IS NULL AND p.start_time > (NOW() AT TIME ZONE 'America/Sao_Paulo') + interval '30 minutes'
       ),
       first_available AS (
-        SELECT room_id, MIN(slot_start) as next_availability
-        FROM available_slots
+        SELECT room_id, MIN(start_time) as next_availability
+        FROM available_blocks
         GROUP BY room_id
       )
       
@@ -94,6 +116,89 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Erro ao buscar salas.' });
   }
 });
+// ROTA 1.5: Obter horários disponíveis dinâmicos - PÚBLICA
+app.get('/api/availability', async (req: Request, res: Response) => {
+  const { roomId, date } = req.query;
+  
+  if (!roomId || !date) {
+    return res.status(400).json({ error: 'Faltam parâmetros roomId ou date' });
+  }
+
+  try {
+    const roomCheck = await pool.query('SELECT locked_by_default FROM rooms WHERE id = $1', [roomId]);
+    if (roomCheck.rows.length === 0) return res.status(404).json({ error: 'Sala não encontrada' });
+    
+    const isLocked = roomCheck.rows[0].locked_by_default;
+
+    if (isLocked) {
+      // Retorna apenas horários liberados ativamente pelo admin (que não tenham sido reservados)
+      const query = `
+        WITH combined_slots AS (
+          SELECT start_time, end_time, date 
+          FROM released_slots 
+          WHERE room_id = $1 AND date = $2
+          
+          UNION ALL
+          
+          SELECT '07:00:00'::time, '13:30:00'::time, $2::date
+          WHERE $1 = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4' 
+          AND EXTRACT(ISODOW FROM $2::date) = 1
+          
+          UNION ALL
+          
+          SELECT '13:30:00'::time, '22:00:00'::time, $2::date
+          WHERE $1 = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4' 
+          AND EXTRACT(ISODOW FROM $2::date) IN (3, 5)
+        )
+        SELECT cs.start_time, cs.end_time 
+        FROM combined_slots cs
+        LEFT JOIN reservations res 
+          ON res.room_id = $1 
+          AND res.status != 'cancelled'
+          AND DATE(lower(res.booking_period)) = cs.date
+          AND cs.start_time::time = lower(res.booking_period)::time
+        WHERE res.id IS NULL
+        ORDER BY cs.start_time ASC
+      `;
+      const result = await pool.query(query, [roomId, date]);
+      const availableTimes = result.rows.map(row => ({
+        start: row.start_time.substring(0, 5),
+        end: row.end_time.substring(0, 5)
+      }));
+      return res.json(availableTimes);
+    } else {
+      // Sala Padrão: Rotina de horários comerciais estendida das 07h as 22h (fechando 23h)
+      const query = `
+        WITH hourly_slots AS (
+          SELECT
+            ($2 || ' ' || lpad(h::text, 2, '0') || ':00:00')::timestamp AS slot_start,
+            ($2 || ' ' || lpad((h+1)::text, 2, '0') || ':00:00')::timestamp AS slot_end
+          FROM generate_series(7, 22) as h
+        )
+        SELECT 
+          hs.slot_start::time as start_time,
+          hs.slot_end::time as end_time
+        FROM hourly_slots hs
+        LEFT JOIN reservations res 
+          ON res.room_id = $1
+          AND res.status != 'cancelled'
+          AND tsrange(hs.slot_start, hs.slot_end) && res.booking_period
+        WHERE res.id IS NULL
+        ORDER BY hs.slot_start ASC
+      `;
+      const result = await pool.query(query, [roomId, date]);
+      const availableTimes = result.rows.map(row => ({
+        start: row.start_time.substring(0, 5),
+        end: row.end_time.substring(0, 5)
+      }));
+      return res.json(availableTimes);
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao verificar disponibilidade' });
+  }
+});
+
 // ROTA 2: Criar uma Reserva - PROTEGIDA
 app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { room_id, user_id, start_time, end_time, total_price } = req.body;
@@ -103,33 +208,92 @@ app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: R
     return res.status(403).json({ error: 'Operação não permitida.' });
   }
 
-  // Verifica se a data do agendamento é no passado garantindo que estamos comparando no mesmo fuso
-  const requestDate = new Date(start_time);
+  // O start_time vem no formato "YYYY-MM-DD HH:mm:00" do frontend.
+  // Vamos garantir que ele seja lido e comparado usando o fuso de São Paulo (-03:00) para evitar problemas de offset do JS
+  let safeStartTime = start_time;
+  if (start_time.includes(' ')) {
+    safeStartTime = start_time.replace(' ', 'T') + '-03:00';
+  } else if (!start_time.includes('T')) {
+    safeStartTime = start_time + 'T00:00:00-03:00';
+  } else if (!start_time.includes('-03:00') && !start_time.endsWith('Z')) {
+    safeStartTime = start_time + '-03:00';
+  }
+
+  const requestDate = new Date(safeStartTime);
   const now = new Date();
 
-  // Como o start_time vem do front sem fuso explícito (ex "2026-03-25 08:00:00"), 
-  // o JS pode criá-lo com um offset diferente do "now". 
-  // Vamos remover a checagem rigorosa de timezone do JS e usar valor numérico básico para evitar bloqueio falso.
-  if (requestDate.getTime() < now.getTime() - (24 * 60 * 60 * 1000)) { // Dá uma tolerância de 1 dia por causa de fuso horário
+  // Agora podemos comparar com precisão. Retiramos a tolerância errônea de 24h.
+  if (requestDate.getTime() < now.getTime()) { 
     return res.status(400).json({ error: 'Não é possível agendar em horários passados.' });
   }
 
   try {
+    // SECURITY CHECK: Se a sala for bloqueada por padrão
+    const roomCheck = await pool.query('SELECT locked_by_default FROM rooms WHERE id = $1', [room_id]);
+    if (roomCheck.rows.length > 0 && roomCheck.rows[0].locked_by_default) {
+      const lockDate = start_time.split(' ')[0];
+      const lockStartTime = start_time.split(' ')[1];
+      const lockEndTime = end_time.split(' ')[1];
+      
+      const releaseCheck = await pool.query(
+        'SELECT id FROM released_slots WHERE room_id = $1 AND date = $2 AND start_time = $3 AND end_time = $4',
+        [room_id, lockDate, lockStartTime, lockEndTime]
+      );
+      
+      if (releaseCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'Este horário está bloqueado e não foi liberado pelo Administrador.' });
+      }
+    }
+
+    // DEDUÇÃO DE TICKETS - (Carteira Wallet Modelo Caminho B)
+    const reqStartObj = new Date(safeStartTime);
+    const reqSafeEndTime = end_time.includes(' ') ? end_time.replace(' ', 'T') + '-03:00' : (!end_time.includes('-03:00') && !end_time.endsWith('Z') ? end_time + '-03:00' : end_time);
+    const reqEndObj = new Date(reqSafeEndTime);
+    const diffHours = (reqEndObj.getTime() - reqStartObj.getTime()) / (1000 * 60 * 60);
+
+    const isShift = diffHours >= 4; // Turnos base começam por 5 horas ou turnos parciais de 4
+    
+    // Ler Estoque do Cliente neste Consultório
+    const ticketCheck = await pool.query(`SELECT hourly_tickets, shift_tickets FROM user_tickets WHERE user_id = $1 AND room_id = $2`, [user_id, room_id]);
+    
+    let hasShiftTicket = false;
+    let hasHourlyTickets = false;
+    let finalStatus = 'pending';
+    let finalPrice = total_price;
+
+    if (ticketCheck.rows.length > 0) {
+      if (isShift && ticketCheck.rows[0].shift_tickets > 0) {
+        hasShiftTicket = true;
+      } else if (!isShift && ticketCheck.rows[0].hourly_tickets >= diffHours) {
+        hasHourlyTickets = true;
+      }
+    }
+
+    if (hasShiftTicket) {
+      finalStatus = 'confirmed';
+      finalPrice = 0;
+      await pool.query(`UPDATE user_tickets SET shift_tickets = shift_tickets - 1 WHERE user_id = $1 AND room_id = $2`, [user_id, room_id]);
+      console.log(`🎫 Ticket de Turno deduzido para usuário ${user_id} na sala ${room_id}`);
+    } else if (hasHourlyTickets) {
+      finalStatus = 'confirmed';
+      finalPrice = 0;
+      await pool.query(`UPDATE user_tickets SET hourly_tickets = hourly_tickets - $3 WHERE user_id = $1 AND room_id = $2`, [user_id, room_id, diffHours]);
+      console.log(`🎫 ${diffHours} Tickets de Hora deduzidos para usuário ${user_id} na sala ${room_id}`);
+    }
+
     const query = `
       INSERT INTO reservations (room_id, user_id, booking_period, total_price, status)
-      VALUES ($1, $2, tsrange($3, $4), $5, 'pending')
+      VALUES ($1, $2, tsrange($3, $4), $5, $6)
       RETURNING *;
     `;
-    const values = [room_id, user_id, start_time, end_time, total_price];
+    const values = [room_id, user_id, start_time, end_time, finalPrice, finalStatus];
 
     const result = await pool.query(query, values);
 
-    // Nota: Removida a simulação automática de pagamento aqui, 
-    // agora será via Mercado Pago nas novas rotas abaixo.
-
     res.status(201).json({
-      message: 'Reserva criada! Aguardando pagamento.',
-      reservation: result.rows[0]
+      message: finalStatus === 'confirmed' ? 'Reserva confirmada via Saldo de Ingressos!' : 'Reserva criada! Aguardando pagamento.',
+      reservation: result.rows[0],
+      paidWithTickets: finalStatus === 'confirmed'
     });
   } catch (err: any) {
     if (err.code === '23P01') { // Código para check_violation
@@ -209,6 +373,19 @@ app.get('/api/admin/reservations', authenticateToken, requireAdmin, async (req: 
 // ROTA 2.2.1: Obter estatísticas de usuários (Admin) - PROTEGIDA (ADMINS SOMENTE)
 app.get('/api/admin/stats/users', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
+    const { month, year } = req.query;
+    
+    let dateFilter = '';
+    const params: any[] = [];
+    
+    if (month && year) {
+      dateFilter = ` AND EXTRACT(MONTH FROM lower(r.booking_period)) = $1 AND EXTRACT(YEAR FROM lower(r.booking_period)) = $2`;
+      params.push(parseInt(month as string), parseInt(year as string));
+    } else if (year) {
+      dateFilter = ` AND EXTRACT(YEAR FROM lower(r.booking_period)) = $1`;
+      params.push(parseInt(year as string));
+    }
+
     const query = `
       SELECT 
         u.id, 
@@ -217,11 +394,11 @@ app.get('/api/admin/stats/users', authenticateToken, requireAdmin, async (req: A
         COUNT(r.id) as total_reservations,
         COALESCE(SUM(CASE WHEN r.status = 'confirmed' THEN r.total_price ELSE 0 END), 0) as total_revenue
       FROM users u
-      LEFT JOIN reservations r ON u.id = r.user_id
+      LEFT JOIN reservations r ON u.id = r.user_id ${dateFilter}
       GROUP BY u.id, u.name, u.email
       ORDER BY total_revenue DESC
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -241,6 +418,60 @@ app.patch('/api/admin/reservations/:id/cancel', authenticateToken, requireAdmin,
   }
 });
 
+// ROTA 2.4: Criar reserva manual ignorando saldos (Admin) - PROTEGIDA (ADMINS SOMENTE)
+app.post('/api/admin/reservations/manual', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { room_id, user_id, start_time, end_time } = req.body;
+
+  if (!room_id || !user_id || !start_time || !end_time) {
+    return res.status(400).json({ error: 'Faltam parâmetros obrigatórios.' });
+  }
+
+  let safeStartTime = start_time;
+  if (start_time.includes(' ')) {
+    safeStartTime = start_time.replace(' ', 'T') + '-03:00';
+  } else if (!start_time.includes('T')) {
+    safeStartTime = start_time + 'T00:00:00-03:00';
+  } else if (!start_time.includes('-03:00') && !start_time.endsWith('Z')) {
+    safeStartTime = start_time + '-03:00';
+  }
+
+  const requestDate = new Date(safeStartTime);
+  const now = new Date();
+
+  if (requestDate.getTime() < now.getTime()) { 
+    return res.status(400).json({ error: 'Não é possível agendar em horários passados.' });
+  }
+
+  try {
+     // Verifica colisão
+     const confCheck = await pool.query(
+        `SELECT id FROM reservations 
+         WHERE room_id = $1 
+         AND status = 'confirmed'
+         AND tsrange($2, $3) && booking_period`, 
+        [room_id, start_time, end_time]
+     );
+     
+     if (confCheck.rows.length > 0) {
+       return res.status(400).json({ error: 'Horário já ocupado por outra reserva confirmada.' });
+     }
+
+     const result = await pool.query(`
+        INSERT INTO reservations (room_id, user_id, booking_period, total_price, status)
+        VALUES ($1, $2, tsrange($3, $4), 0, 'confirmed')
+        RETURNING *
+     `, [room_id, user_id, start_time, end_time]);
+     
+     res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+     console.error(err);
+     if (err.code === '23P01') {
+       return res.status(400).json({ error: 'Horário inválido ou no passado.' });
+     }
+     res.status(500).json({ error: 'Erro ao criar reserva manual.' });
+  }
+});
+
 // ─── ADMIN DATA MANAGEMENT (DEBUG) ───────────────────────────────────────
 
 // USUÁRIOS
@@ -251,6 +482,31 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, async (req: AuthReq
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro ao listar usuários.' });
+  }
+});
+
+// SALDOS DE USUÁRIOS
+app.get('/api/admin/users-balances', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const query = `
+      SELECT 
+        u.id as user_id, 
+        u.name as user_name, 
+        u.email as user_email,
+        r.name as room_name,
+        ut.hourly_tickets,
+        ut.shift_tickets
+      FROM users u
+      JOIN user_tickets ut ON u.id = ut.user_id
+      JOIN rooms r ON ut.room_id = r.id
+      WHERE ut.hourly_tickets > 0 OR ut.shift_tickets > 0
+      ORDER BY u.name ASC, r.name ASC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar saldos dos usuários.' });
   }
 });
 
@@ -277,6 +533,79 @@ app.delete('/api/admin/users/:id', authenticateToken, requireAdmin, async (req: 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro ao excluir usuário.' });
+  }
+});
+
+// CRÉDITOS VIRTUAIS (ADMIN)
+app.post('/api/admin/add-tickets', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { userId, roomId, hourlyTickets, shiftTickets } = req.body;
+  if (!userId || !roomId) {
+    return res.status(400).json({ error: 'Faltam parâmetros userId ou roomId.' });
+  }
+
+  const hours = parseInt(hourlyTickets) || 0;
+  const shifts = parseInt(shiftTickets) || 0;
+
+  try {
+    const check = await pool.query('SELECT * FROM user_tickets WHERE user_id = $1 AND room_id = $2', [userId, roomId]);
+    if (check.rows.length > 0) {
+      await pool.query(
+        'UPDATE user_tickets SET hourly_tickets = hourly_tickets + $1, shift_tickets = shift_tickets + $2 WHERE user_id = $3 AND room_id = $4',
+        [hours, shifts, userId, roomId]
+      );
+    } else {
+      await pool.query(
+        'INSERT INTO user_tickets (user_id, room_id, hourly_tickets, shift_tickets) VALUES ($1, $2, $3, $4)',
+        [userId, roomId, hours, shifts]
+      );
+    }
+    res.json({ message: 'Saldos adicionados com sucesso!' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao adicionar saldos virtuais.' });
+  }
+});
+
+// LIBERAÇÃO DE HORÁRIOS PARA SALAS BLOQUEADAS
+app.get('/api/admin/released_slots', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { roomId } = req.query;
+  try {
+    let query = 'SELECT * FROM released_slots ORDER BY date DESC, start_time ASC';
+    let params: any[] = [];
+    if (roomId) {
+      query = 'SELECT * FROM released_slots WHERE room_id = $1 ORDER BY date DESC, start_time ASC';
+      params = [roomId];
+    }
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar horários liberados.' });
+  }
+});
+
+app.post('/api/admin/released_slots', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { room_id, date, start_time, end_time } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO released_slots (room_id, date, start_time, end_time) VALUES ($1, $2, $3, $4) RETURNING *',
+      [room_id, date, start_time, end_time]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao liberar horário.' });
+  }
+});
+
+app.delete('/api/admin/released_slots/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM released_slots WHERE id = $1', [id]);
+    res.json({ message: 'Horário bloqueado novamente.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao remover liberação.' });
   }
 });
 
@@ -350,7 +679,7 @@ app.put('/api/admin/reservations/:id', authenticateToken, requireAdmin, async (r
 
 // ─── AUTHENTICATION ──────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req: Request, res: Response) => {
-  const { name, email, password, phone } = req.body;
+  const { name, email, password, phone, cpf, cro, address } = req.body;
   try {
     const existingUserCheck = await pool.query("SELECT id, is_phone_verified FROM users WHERE email = $1", [email]);
     let user;
@@ -365,8 +694,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       const salt = await bcrypt.genSalt(10);
       const password_hash = await bcrypt.hash(password, salt);
       const updatedUser = await pool.query(
-        "UPDATE users SET name = $1, password_hash = $2, phone = $3 WHERE email = $4 RETURNING id, name, email, phone, is_phone_verified",
-        [name, password_hash, phone, email]
+        "UPDATE users SET name = $1, password_hash = $2, phone = $3, cpf = $5, cro = $6, address = $7 WHERE email = $4 RETURNING id, name, email, phone, cpf, cro, address, is_phone_verified",
+        [name, password_hash, phone, email, cpf, cro, address]
       );
       user = updatedUser.rows[0];
 
@@ -376,8 +705,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       const salt = await bcrypt.genSalt(10);
       const password_hash = await bcrypt.hash(password, salt);
       const newUser = await pool.query(
-        "INSERT INTO users (name, email, password_hash, phone, is_phone_verified) VALUES ($1, $2, $3, $4, FALSE) RETURNING id, name, email, phone, is_phone_verified",
-        [name, email, password_hash, phone]
+        "INSERT INTO users (name, email, password_hash, phone, cpf, cro, address, is_phone_verified) VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE) RETURNING id, name, email, phone, cpf, cro, address, is_phone_verified",
+        [name, email, password_hash, phone, cpf, cro, address]
       );
       user = newUser.rows[0];
     }
@@ -484,6 +813,38 @@ app.post('/api/auth/verify-phone', authenticateToken, async (req: AuthRequest, r
   }
 });
 
+// ROTA 3.5: Perfil do Usuário e Tickets (Carteira)
+app.get('/api/users/me', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const userQuery = await pool.query(`
+      SELECT id, name, email, phone, cpf, cro, address, is_admin 
+      FROM users WHERE id = $1
+    `, [userId]);
+
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+
+    const ticketsQuery = await pool.query(`
+      SELECT room_id, hourly_tickets, shift_tickets 
+      FROM user_tickets WHERE user_id = $1
+    `, [userId]);
+
+    const user = userQuery.rows[0];
+    user.tickets = ticketsQuery.rows; // Array de {room_id, hourly_tickets, shift_tickets}
+
+    res.json(user);
+  } catch (error) {
+    console.error('Erro ao buscar perfil do usuário:', error);
+    res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
+
 // ROTA 4: Login de Usuário
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -538,6 +899,16 @@ app.post('/api/payments/create-preference', authenticateToken, async (req: AuthR
           pending: `${process.env.NEXT_PUBLIC_APP_URL}/reservations`,
         },
         auto_return: 'approved',
+        payment_methods: {
+          excluded_payment_types: [
+            { id: 'credit_card' },
+            { id: 'debit_card' },
+            { id: 'ticket' }, 
+            { id: 'digital_currency' },
+            { id: 'digital_wallet' }
+          ],
+          installments: 1
+        },
         metadata: {
           reservation_id: reservation_id
         }
@@ -548,6 +919,106 @@ app.post('/api/payments/create-preference', authenticateToken, async (req: AuthR
   } catch (error) {
     console.error('Erro MP Preference:', error);
     res.status(500).json({ error: 'Erro ao criar preferência de pagamento' });
+  }
+});
+
+app.post('/api/payments/create-pix', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { reservation_id, title, unit_price } = req.body;
+
+  try {
+    const userRes = await pool.query('SELECT name, email, cpf FROM users WHERE id = $1', [(req as any).user.id]);
+    const payment = new Payment(client); // Assuming 'client' is the Mercado Pago client instance
+    
+    // Fallbacks para campos obrigatórios do MP caso usuário não os tenha
+    const userEmail = userRes.rows[0]?.email || 'teste@teste.com.br';
+    const userName = userRes.rows[0]?.name || 'Usuário';
+    const userCpf = userRes.rows[0]?.cpf ? userRes.rows[0].cpf.replace(/\D/g, '') : '00000000000'; // Fallback só para tentar não dar 400 em usuários legado
+    
+    const response = await payment.create({
+      body: {
+        transaction_amount: Number(unit_price),
+        description: title,
+        payment_method_id: 'pix',
+        payer: {
+          email: userEmail,
+          first_name: userName,
+          identification: {
+            type: 'CPF',
+            number: userCpf
+          }
+        },
+        metadata: {
+          reservation_id: reservation_id
+        }
+      }
+    });
+
+    const pixData = response.point_of_interaction?.transaction_data;
+    if (pixData) {
+      res.json({
+        qr_code: pixData.qr_code,
+        qr_code_base64: pixData.qr_code_base64,
+        payment_id: response.id
+      });
+    } else {
+      res.status(500).json({ error: 'Erro ao extrair dados do PIX' });
+    }
+  } catch (error) {
+    console.error('Erro de Criação PIX Direto:', error);
+    res.status(500).json({ error: 'Erro ao gerar pagamento PIX' });
+  }
+});
+
+// ROTA 5.1.5: Criar Pagamento PIX Direto MercadoPago (Compra de Pacotes)
+app.post('/api/payments/packages', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { title, unit_price, room_id, shift_tickets, hourly_tickets } = req.body;
+  const userId = req.user?.id;
+
+  try {
+    const userRes = await pool.query('SELECT name, email, cpf FROM users WHERE id = $1', [userId]);
+    const payment = new Payment(client);
+    
+    // Fallbacks para campos obrigatórios do MP caso usuário não os tenha
+    const userEmail = userRes.rows[0]?.email || 'teste@teste.com.br';
+    const userName = userRes.rows[0]?.name || 'Usuário';
+    const userCpf = userRes.rows[0]?.cpf ? userRes.rows[0].cpf.replace(/\D/g, '') : '00000000000';
+    
+    const response = await payment.create({
+      body: {
+        transaction_amount: Number(unit_price),
+        description: title,
+        payment_method_id: 'pix',
+        payer: {
+          email: userEmail,
+          first_name: userName,
+          identification: {
+            type: 'CPF',
+            number: userCpf
+          }
+        },
+        metadata: {
+          is_package: true,
+          user_id: userId,
+          room_id: room_id,
+          shift_tickets: Number(shift_tickets) || 0,
+          hourly_tickets: Number(hourly_tickets) || 0
+        }
+      }
+    });
+
+    const pixData = response.point_of_interaction?.transaction_data;
+    if (pixData) {
+      res.json({
+        qr_code: pixData.qr_code,
+        qr_code_base64: pixData.qr_code_base64,
+        payment_id: response.id
+      });
+    } else {
+      res.status(500).json({ error: 'Erro ao extrair dados do PIX' });
+    }
+  } catch (error) {
+    console.error('Erro de Criação PIX Pacote:', error);
+    res.status(500).json({ error: 'Erro ao gerar pagamento PIX do pacote' });
   }
 });
 
@@ -569,24 +1040,46 @@ app.post('/api/payments/webhook', async (req: Request, res: Response) => {
       const paymentData = await paymentResponse.json();
 
       if (paymentData.status === 'approved') {
-        const reservation_id = paymentData.metadata.reservation_id;
+        const metadata = paymentData.metadata;
+        
+        if (metadata?.is_package) {
+          // Fluxo de Compra de Pacotes / Tickets
+          const userId = metadata.user_id;
+          const roomId = metadata.room_id;
+          const shiftTickets = Number(metadata.shift_tickets) || 0;
+          const hourlyTickets = Number(metadata.hourly_tickets) || 0;
+          
+          await pool.query(`
+            INSERT INTO user_tickets (user_id, room_id, hourly_tickets, shift_tickets)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, room_id) DO UPDATE 
+            SET hourly_tickets = user_tickets.hourly_tickets + EXCLUDED.hourly_tickets,
+                shift_tickets = user_tickets.shift_tickets + EXCLUDED.shift_tickets
+          `, [userId, roomId, hourlyTickets, shiftTickets]);
+          
+          console.log(`✅ Webhook MP: Pacote Integrado! Usuário ID: ${userId} recebeu +${shiftTickets} Turnos e +${hourlyTickets} Horas no Consultório ID: ${roomId}`);
+        
+        } else if (metadata?.reservation_id) {
+          // Fluxo Convencional de Locação Direta (Avulso Checkout)
+          const reservation_id = metadata.reservation_id;
 
-        // 1. Atualizar Status da Reserva
-        await pool.query(
-          'UPDATE reservations SET status = $1 WHERE id = $2',
-          ['confirmed', reservation_id]
-        );
+          // 1. Atualizar Status da Reserva
+          await pool.query(
+            'UPDATE reservations SET status = $1 WHERE id = $2',
+            ['confirmed', reservation_id]
+          );
 
-        // 2. Registrar/Atualizar Pagamento
-        await pool.query(`
-          INSERT INTO payments (reservation_id, gateway_transaction_id, payment_status, amount_paid)
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT (gateway_transaction_id) 
-          DO UPDATE SET payment_status = $3, updated_at = NOW()`,
-          [reservation_id, paymentId.toString(), 'succeeded', paymentData.transaction_amount]
-        );
+          // 2. Registrar/Atualizar Pagamento
+          await pool.query(`
+            INSERT INTO payments (reservation_id, gateway_transaction_id, payment_status, amount_paid)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (gateway_transaction_id) 
+            DO UPDATE SET payment_status = $3, updated_at = NOW()`,
+            [reservation_id, paymentId.toString(), 'succeeded', paymentData.transaction_amount]
+          );
 
-        console.log(`✅ Pagamento ${paymentId} aprovado para reserva ${reservation_id}`);
+          console.log(`✅ Webhook MP: Pagamento Direto Aprovado para Locação ${reservation_id}`);
+        }
       }
     } catch (error) {
       console.error('Erro Webhook MP:', error);
@@ -614,10 +1107,10 @@ setInterval(async () => {
       if (res.phone) {
         const cleanPhone = res.phone.replace(/\D/g, '');
         const fullNumber = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-        const text = 'Olá, sua reserva de sala na · LIV · Odontologia foi cancelada';
+        const text = 'Olá! ⏰ O prazo de 20 minutos para o pagamento expirou e sua reserva de sala na *· LIV · Odontologia* foi cancelada automaticamente pelo sistema.\n\nFique à vontade para acessar o aplicativo e agendar um novo horário quando desejar!';
 
         try {
-          await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`, {
+          const waRes = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -628,6 +1121,7 @@ setInterval(async () => {
               text: text
             })
           });
+          if (!waRes.ok) throw new Error(`HTTP ${waRes.status}`);
           console.log(`✅ Aviso de cancelamento WhatsApp enviado para a reserva ${res.id}`);
         } catch (waError) {
           console.error(`❌ Erro ao enviar aviso de cancelamento WA para a reserva ${res.id}:`, waError);
@@ -650,6 +1144,65 @@ setInterval(async () => {
   }
 }, 60000); // Roda a cada 1 minuto
 
+// ─── TICKET PACKAGES (E-COMMERCE DINÂMICO) ──────────────────────────────────────────────────────
+
+// ROTA PÚBLICA / AUTHENTICADA: Listar pacotes ativos
+app.get('/api/packages', async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`SELECT * FROM ticket_packages WHERE is_active = TRUE ORDER BY price ASC`);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar pacotes.' });
+  }
+});
+
+// ADMIN: Criar pacote
+app.post('/api/admin/packages', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { room_id, title, type, qty, price, description } = req.body;
+  try {
+    const result = await pool.query(
+      `INSERT INTO ticket_packages (room_id, title, type, qty, price, description) 
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [room_id, title, type, qty, price, description]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao criar pacote.' });
+  }
+});
+
+// ADMIN: Atualizar pacote
+app.put('/api/admin/packages/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { title, type, qty, price, description, is_active } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE ticket_packages 
+       SET title = $1, type = $2, qty = $3, price = $4, description = $5, is_active = $6 
+       WHERE id = $7 RETURNING *`,
+      [title, type, qty, price, description, is_active !== undefined ? is_active : true, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao editar pacote.' });
+  }
+});
+
+// ADMIN: Deletar pacote
+app.delete('/api/admin/packages/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM ticket_packages WHERE id = $1', [id]);
+    res.json({ message: 'Pacote deletado com sucesso.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao deletar pacote.' });
+  }
+});
+
 // Payment Reminder: Enviar WhatsApp após 10 minutos
 setInterval(async () => {
   try {
@@ -671,10 +1224,10 @@ setInterval(async () => {
         const cleanPhone = res.phone.replace(/\D/g, '');
         const fullNumber = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
         const link = `${process.env.FRONTEND_URL}/reservations`;
-        const text = `Olá, confirme a sua reserva na ${res.room_name} no dia ${res.res_date} às ${res.start_time} - ${res.end_time} realizando o pagamento. (${link})`;
+        const text = `Olá! Notamos que sua reserva na *${res.room_name}* no dia ${res.res_date} às ${res.start_time} - ${res.end_time} ainda está pendente. ⏳\n\nFaltam apenas 10 minutos para o cancelamento automático. Para garantir sua sala, confirme a reserva realizando o pagamento agora mesmo.\n\n🔗 *Link Seguro para Pagamento:*\n${link}`;
 
         try {
-          await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`, {
+          const waRes = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -685,6 +1238,11 @@ setInterval(async () => {
               text: text
             })
           });
+          
+          if (!waRes.ok) {
+            const errTxt = await waRes.text();
+            throw new Error(`Resposta Evolution API: HTTP ${waRes.status} - ${errTxt}`);
+          }
 
           // Marcar como enviado
           await pool.query("UPDATE reservations SET payment_reminder_sent = TRUE WHERE id = $1", [res.id]);

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Header } from '@/components/Header';
 import { QRCodeSVG } from 'qrcode.react';
 
 interface Reservation {
@@ -16,6 +17,11 @@ interface Reservation {
   created_at: string;
 }
 
+function getSafeDate(dateString: string) {
+  if (!dateString) return new Date();
+  return new Date(dateString.endsWith('Z') ? dateString.slice(0, -1) + '-03:00' : dateString + '-03:00');
+}
+
 export default function Reservations() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,6 +29,12 @@ export default function Reservations() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null);
   const [nowUTC, setNowUTC] = useState(new Date());
+  
+  // PIX Modal States
+  const [pixData, setPixData] = useState<{qr_code: string, qr_code_base64: string, payment_id: number} | null>(null);
+  const [isPixModalOpen, setIsPixModalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  
   const router = useRouter();
 
   // Atualiza o relógio a cada 1 segundo para o countdown preciso
@@ -59,8 +71,9 @@ export default function Reservations() {
 
   const handlePayment = async (reservation: Reservation) => {
     setPaymentLoading(reservation.id);
+    setPixData(null);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/payments/create-preference`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/payments/create-pix`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -69,16 +82,16 @@ export default function Reservations() {
         body: JSON.stringify({
           reservation_id: reservation.id,
           title: `Reserva: ${reservation.room_name}`,
-          unit_price: reservation.total_price,
-          quantity: 1
+          unit_price: reservation.total_price
         })
       });
 
       const data = await response.json();
-      if (data.init_point) {
-        window.location.href = data.init_point;
+      if (data.qr_code) {
+        setPixData(data);
+        setIsPixModalOpen(true);
       } else {
-        alert('Erro ao iniciar pagamento. Tente novamente.');
+        alert('Erro ao iniciar pagamento. Verifique com a administração.');
       }
     } catch (error) {
       console.error(error);
@@ -88,44 +101,17 @@ export default function Reservations() {
     }
   };
 
+  const copyToClipboard = () => {
+    if (pixData?.qr_code) {
+      navigator.clipboard.writeText(pixData.qr_code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   return (
     <>
-      <header>
-        <Link href="/" style={{ textDecoration: 'none', color: 'var(--foreground)', fontWeight: 600, letterSpacing: '0.1em' }}>· L I V · ODONTOLOGIA</Link>
-
-        <div className="desktop-nav">
-          <Link href="/" style={{ textDecoration: 'none', color: 'rgba(0,0,0,0.4)' }}>Salas</Link>
-          <Link href="/reservations" style={{ textDecoration: 'none', color: 'var(--foreground)' }}>Reservas</Link>
-          {user?.is_admin && <Link href="/admin" style={{ textDecoration: 'none', color: 'var(--accent)', fontWeight: 600 }}>Admin</Link>}
-          <button onClick={() => { localStorage.removeItem('roomrental_user'); router.push('/login'); }} style={{ background: 'transparent', border: 'none', color: 'rgba(0,0,0,0.3)', cursor: 'pointer', fontSize: '13px' }}>Sair</button>
-        </div>
-
-        <button className="menu-button" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-          <span className="bar"></span>
-          <span className="bar"></span>
-          <span className="bar"></span>
-        </button>
-      </header>
-
-      <AnimatePresence>
-        {isMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="menu-overlay"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            <button className="close-menu-button" onClick={() => setIsMenuOpen(false)}>✕</button>
-            <nav className="mobile-nav">
-              <Link href="/" onClick={() => setIsMenuOpen(false)}>Salas</Link>
-              <Link href="/reservations" onClick={() => setIsMenuOpen(false)}>Reservas</Link>
-              {user?.is_admin && <Link href="/admin" onClick={() => setIsMenuOpen(false)}>Admin</Link>}
-              <button onClick={() => { localStorage.removeItem('roomrental_user'); router.push('/login'); }} >Sair</button>
-            </nav>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Header />
 
       <main className="main-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
         <section style={{ marginBottom: '60px', textAlign: 'center' }}>
@@ -289,6 +275,99 @@ export default function Reservations() {
           </div>
         )}
       </main>
+
+      <AnimatePresence>
+        {isPixModalOpen && pixData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.8)',
+              backdropFilter: 'blur(10px)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px'
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              style={{
+                background: 'white',
+                borderRadius: '32px',
+                padding: '40px',
+                width: '100%',
+                maxWidth: '450px',
+                textAlign: 'center',
+                boxShadow: '0 24px 48px rgba(0,0,0,0.2)',
+                position: 'relative'
+              }}
+            >
+              <button 
+                onClick={() => setIsPixModalOpen(false)}
+                style={{
+                  position: 'absolute', top: '24px', right: '24px',
+                  background: 'rgba(0,0,0,0.05)', border: 'none',
+                  width: '32px', height: '32px', borderRadius: '50%',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 'bold', color: 'black'
+                }}
+              >✕</button>
+              
+              <div style={{ width: '64px', height: '64px', background: 'rgba(52, 199, 89, 0.1)', color: '#34c759', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: '28px' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" fill="currentColor" fillOpacity="0.2"/>
+                  <path d="M16 8L10 16L7 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+
+              <h2 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '8px', letterSpacing: '-0.02em' }}>Pague via PIX</h2>
+              <p style={{ color: 'rgba(0,0,0,0.5)', fontSize: '14px', marginBottom: '24px', lineHeight: '1.5' }}>
+                Escaneie o QR Code abaixo no app do seu banco ou copie o código. A aprovação é imediata.
+              </p>
+
+              <div style={{ 
+                background: 'white', padding: '16px', borderRadius: '24px', 
+                border: '2px dashed var(--border)', display: 'inline-block', marginBottom: '24px' 
+              }}>
+                <img src={`data:image/jpeg;base64,${pixData.qr_code_base64}`} alt="PIX QR Code" style={{ width: '200px', height: '200px' }} />
+              </div>
+
+              <div style={{ textAlign: 'left', marginBottom: '8px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'rgba(0,0,0,0.4)' }}>
+                Ou copie o código (Copia e Cola):
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input 
+                  type="text" 
+                  value={pixData.qr_code} 
+                  readOnly 
+                  style={{ 
+                    flex: 1, padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border)', 
+                    background: 'rgba(0,0,0,0.02)', outline: 'none', fontSize: '13px', color: 'rgba(0,0,0,0.6)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                  }} 
+                />
+                <button 
+                  onClick={copyToClipboard}
+                  style={{ 
+                    background: copied ? '#34c759' : 'black', color: 'white', border: 'none', 
+                    borderRadius: '12px', padding: '0 20px', fontWeight: 600, cursor: 'pointer',
+                    transition: 'all 0.2s' 
+                  }}
+                >
+                  {copied ? 'Copiado!' : 'Copiar'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

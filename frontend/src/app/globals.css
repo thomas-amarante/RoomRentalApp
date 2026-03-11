@@ -49,30 +49,69 @@ header {
   top: 0;
   left: 0;
   right: 0;
-  height: 48px;
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid var(--border);
+  height: 80px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* Mantém space-between */
-  padding: 0 20px;
+  padding: 0 40px;
   font-size: 14px;
-  color: var(--foreground);
 }
 
-header>a {
-  /* Garante que o link do logo fique à esquerda */
-  margin-right: auto;
-}
+
 
 /* Estilos para o container da navegação do desktop */
 .desktop-nav {
   display: none;
   align-items: center;
-  gap: 24px;
+  gap: 32px;
+}
+
+.desktop-nav a {
+  color: rgba(0, 0, 0, 0.6);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.desktop-nav a:hover {
+  color: #000;
+}
+
+.desktop-nav .action-btn {
+  background: #16a34a;
+  color: white !important;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.desktop-nav .action-btn:hover {
+  background: #15803d;
+  transform: translateY(-1px);
+}
+
+.desktop-nav .logout-btn {
+  background: transparent;
+  border: 1px solid rgba(0,0,0,0.1);
+  color: rgba(0,0,0,0.6);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.desktop-nav .logout-btn:hover {
+  border-color: rgba(0,0,0,0.3);
+  color: #000;
 }
 
 /* Botão do menu hambúrguer */
@@ -102,7 +141,6 @@ header>a {
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.95);
-  /* Preto mais opaco */
   backdrop-filter: blur(10px);
   z-index: 1005;
   display: flex;
@@ -115,20 +153,15 @@ header>a {
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* Centraliza os itens verticalmente */
 }
 
 .mobile-nav a,
 .mobile-nav button {
-  /* Inclui botões no estilo */
   color: white;
   text-decoration: none;
   font-size: 36px;
-  /* Aumenta o tamanho da fonte */
   font-weight: 600;
-  /* Mais destaque */
   margin: 15px 0;
-  /* Ajusta espaçamento */
   opacity: 0.9;
   transition: opacity 0.2s ease;
   background: none;
@@ -160,22 +193,19 @@ header>a {
 }
 
 /* Media Query para telas maiores (desktop) */
-@media (min-width: 768px) {
-  header {
-    justify-content: space-around;
-  }
-
-  header>a {
-    /* Reseta a margem para o logo em desktop */
-    margin-right: 0;
-  }
-
+@media (min-width: 1100px) {
   .desktop-nav {
     display: flex;
   }
-
   .menu-button {
     display: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  header {
+    padding: 0 20px;
+    height: 64px;
   }
 }
 
@@ -253,11 +283,14 @@ header>a {
 }
 
 .room-card-title {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
-  margin-bottom: 8px;
-  color: #1d1d1f;
-  /* Cor principal de texto Apple clara */
+  margin: -28px -28px 16px -28px; /* Margem negativa para esticar até a borda ignorando o padding do card */
+  color: #ffffff; /* Letra Branca */
+  background-color: #0071e3; /* Accent Blue do estilo geral da página */
+  padding: 20px;
+  border-radius: 20px 20px 0 0; /* Arredondamento apenas no topo para seguir o card principal */
+  text-align: center;
   letter-spacing: -0.02em;
 }
 

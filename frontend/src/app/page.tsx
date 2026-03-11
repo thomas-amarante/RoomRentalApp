@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Header } from '@/components/Header';
 
 interface Room {
   id: string;
@@ -18,7 +19,13 @@ interface Room {
 function formatNextAvailability(dateString: string | null) {
   if (!dateString) return 'Consultar disponibilidade';
 
-  const date = new Date(dateString);
+  // O DB retorna um Timestamp Sem Timezone (ex: "2026-03-25T07:00:00.000Z")
+  // Precisamos garantir que o JS leia isso considerando que FOI gerado no horário de Brasília (-03:00)
+  // Caso contrário, o browser diminui 3 horas achando que a string é UTC.
+  const isZULU = dateString.endsWith('Z');
+  const safeDateStr = isZULU ? dateString.slice(0, -1) + '-03:00' : dateString + '-03:00';
+
+  const date = new Date(safeDateStr);
   const now = new Date();
 
   const isToday = date.getDate() === now.getDate() &&
@@ -56,6 +63,15 @@ export default function Home() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const router = useRouter();
 
+  // Componente Auxiliar para Redirecionamento com Cleanup Seguro
+  const ZeroBalanceRedirect = () => {
+    useEffect(() => {
+      const t = setTimeout(() => router.push('/account'), 4500);
+      return () => clearTimeout(t);
+    }, []);
+    return null;
+  };
+
   // --- Lógica de Data/Hora ---
   const getLocalDateString = () => {
     const d = new Date();
@@ -67,17 +83,86 @@ export default function Home() {
   const today = getLocalDateString();
   const [date, setDate] = useState(today);
 
-  const hourlyOptions = ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-  const shiftOptions = [
-    { label: '08:00 - 12:00', value: '08:00-12:00' },
-    { label: '13:00 - 17:00', value: '13:00-17:00' },
-    { label: '14:00 - 18:00', value: '14:00-18:00' },
-    { label: '15:00 - 19:00', value: '15:00-19:00' },
-  ];
+  const [availableSlots, setAvailableSlots] = useState<{ start: string, end: string }[]>([]);
+  const [isFetchingAvailability, setIsFetchingAvailability] = useState(false);
 
-  const [startTime, setStartTime] = useState(hourlyOptions[0]);
-  const [endTime, setEndTime] = useState('10:00');
-  const [shift, setShift] = useState(shiftOptions[0].value);
+  useEffect(() => {
+    if (selectedRoom) {
+      setIsFetchingAvailability(true);
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/availability?roomId=${selectedRoom.id}&date=${date}`)
+        .then(res => res.json())
+        .then(data => {
+          setAvailableSlots(data);
+          if (data.length > 0) {
+            const currentHour = new Date().getHours();
+            let firstValidSlot = data[0];
+
+            if (date === today) {
+              // Procurar o primeiro slot que seja > hora atual
+              const foundValid = data.find((s: { start: string, end: string }) => parseInt(s.start.split(':')[0]) > currentHour);
+              if (foundValid) firstValidSlot = foundValid;
+            }
+
+            setStartTime(firstValidSlot.start);
+            setEndTime(firstValidSlot.end);
+            setShift(`${firstValidSlot.start}-${firstValidSlot.end}`);
+          } else {
+            setStartTime(''); setEndTime(''); setShift('');
+          }
+        })
+        .finally(() => setIsFetchingAvailability(false));
+    }
+  }, [selectedRoom, date, today]);
+
+  const isLocked = selectedRoom && (selectedRoom as any).locked_by_default;
+
+  const currentHourlyOptions = useMemo(() => {
+    return isLocked
+      ? availableSlots.map(s => s.start)
+      : [
+        '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+        '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
+        '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30',
+        '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'
+      ];
+  }, [isLocked, availableSlots]);
+
+  const currentShiftOptions = useMemo(() => {
+    return isLocked
+      ? availableSlots.map(s => ({ label: `${s.start} - ${s.end} (Libertado)`, value: `${s.start}-${s.end}` }))
+      : [
+        { label: '07:00 - 12:00', value: '07:00-12:00' },
+        { label: '08:00 - 13:00', value: '08:00-13:00' },
+        { label: '13:00 - 18:00', value: '13:00-18:00' },
+        { label: '14:00 - 19:00', value: '14:00-19:00' },
+        { label: '15:00 - 20:00', value: '15:00-20:00' },
+        { label: '18:00 - 23:00', value: '18:00-23:00' },
+      ];
+  }, [isLocked, availableSlots]);
+
+  const [startTime, setStartTime] = useState('07:00');
+  const [endTime, setEndTime] = useState('08:00');
+  const [shift, setShift] = useState('07:00-12:00');
+
+  // Ajusta automaticamente a hora inicial quando a data ou tipo de sala muda
+  useEffect(() => {
+    if (!selectedRoom || isLocked) return; // Se for isLocked, o fetch da API já resolve
+
+    const currentHour = new Date().getHours();
+
+    if (date === today) {
+      if (bookingType === 'hourly') {
+        const firstValidHour = currentHourlyOptions.find(hour => parseInt(hour.split(':')[0]) > currentHour);
+        if (firstValidHour) setStartTime(firstValidHour);
+      } else {
+        const firstValidShift = currentShiftOptions.find(opt => parseInt(opt.value.split('-')[0].split(':')[0]) > currentHour);
+        if (firstValidShift) setShift(firstValidShift.value);
+      }
+    } else {
+      setStartTime(currentHourlyOptions[0] || '07:00');
+      setShift(currentShiftOptions[0]?.value || '07:00-12:00');
+    }
+  }, [date, today, bookingType, currentHourlyOptions, currentShiftOptions, selectedRoom, isLocked]);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('roomrental_user');
@@ -89,7 +174,20 @@ export default function Home() {
         router.push('/verify');
         return;
       }
+      // Set baseline user first
       setUser(userData);
+
+      // Fetch fresh user data (including tickets)
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/me`, {
+        headers: { 'Authorization': `Bearer ${userData.token || ''}` }
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(freshData => {
+          if (freshData) setUser({ ...freshData, token: userData.token });
+        })
+        .catch(console.error);
+
+      // Fetch rooms
       fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/rooms`)
         .then(res => res.json())
         .then(data => setRooms(data))
@@ -98,16 +196,40 @@ export default function Home() {
     }
   }, [router]);
 
-  // Garante que o endTime seja sempre 1 hora depois do startTime
+  // Garante que o endTime seja calculado corretamente para salas bloqueadas vs padrão
   useEffect(() => {
     if (bookingType === 'hourly' && startTime) {
-      const [hours] = startTime.split(':').map(Number);
-      setEndTime(`${String(hours + 1).padStart(2, '0')}:00`);
+      if (isLocked) {
+        const slot = availableSlots.find(s => s.start === startTime);
+        if (slot) setEndTime(slot.end);
+      } else {
+        const [hours, minutes] = startTime.split(':').map(Number);
+        setEndTime(`${String(hours + 1).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
+      }
     }
-  }, [startTime, bookingType]);
+  }, [startTime, bookingType, isLocked, availableSlots]);
 
   const handleBooking = async () => {
     if (!selectedRoom || !user) return;
+
+    // Validação Frontend extra no botão "Confirmar"
+    if (date === today) {
+      const currentHour = new Date().getHours();
+      if (bookingType === 'hourly') {
+        const selectedHour = parseInt(startTime.split(':')[0]);
+        if (selectedHour <= currentHour) {
+          alert('Não é possível agendar um horário que já passou ou está em andamento na hora atual.');
+          return;
+        }
+      } else {
+        const selectedStartHour = parseInt(shift.split('-')[0].split(':')[0]);
+        if (selectedStartHour <= currentHour) {
+          alert('Não é possível agendar um turno que já começou ou já passou na hora atual.');
+          return;
+        }
+      }
+    }
+
     setIsBooking(true);
 
     let start: string, end: string;
@@ -138,10 +260,14 @@ export default function Home() {
       });
 
       if (response.ok) {
+        const data = await response.json();
+        if (data.paidWithTickets) {
+          alert('Horário Marcado! Como você possui pacotes, não foi gerado cobrança. 1 ingresso foi deduzido da sua conta.');
+        }
         setBookingSuccess(true);
         setTimeout(() => {
           router.push('/reservations');
-        }, 1500);
+        }, 2000);
       } else {
         const data = await response.json();
         alert(data.error || 'Erro ao agendar');
@@ -157,49 +283,11 @@ export default function Home() {
 
   return (
     <>
-      <header>
-        <Link href="/" style={{ textDecoration: 'none', color: 'var(--foreground)', fontWeight: 600, letterSpacing: '0.1em' }}>· L I V · ODONTOLOGIA</Link>
-
-        {/* Desktop Menu */}
-        <div className="desktop-nav">
-          <Link href="/" style={{ textDecoration: 'none', color: 'var(--foreground)' }}>Salas</Link>
-          <Link href="/reservations" style={{ textDecoration: 'none', color: 'rgba(0,0,0,0.4)' }}>Reservas</Link>
-          {user.is_admin && <Link href="/admin" style={{ textDecoration: 'none', color: 'var(--accent)', fontWeight: 600 }}>Admin</Link>}
-          <button onClick={() => { localStorage.removeItem('roomrental_user'); router.push('/login'); }} style={{ background: 'transparent', border: 'none', color: 'rgba(0,0,0,0.3)', cursor: 'pointer', fontSize: '13px' }}>Sair</button>
-        </div>
-
-        {/* Mobile Menu Button */}
-        <button className="menu-button" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-          <span className="bar"></span>
-          <span className="bar"></span>
-          <span className="bar"></span>
-        </button>
-      </header>
-
-      {/* Mobile Menu Overlay */}
-      <AnimatePresence>
-        {isMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="menu-overlay"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            <button className="close-menu-button" onClick={() => setIsMenuOpen(false)}>✕</button>
-            <nav className="mobile-nav">
-              <Link href="/" onClick={() => setIsMenuOpen(false)}>Salas</Link>
-              <Link href="/reservations" onClick={() => setIsMenuOpen(false)}>Reservas</Link>
-              {user.is_admin && <Link href="/admin" onClick={() => setIsMenuOpen(false)}>Admin</Link>}
-              <button onClick={() => { localStorage.removeItem('roomrental_user'); router.push('/login'); }} >Sair</button>
-            </nav>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Header />
       <main className="main-container">
         <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: '80px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '56px', fontWeight: 700, marginBottom: '16px', color: 'black' }}>Olá, {user.name.split(' ')[0]}.</h1>
-          <p style={{ fontSize: '24px', color: 'rgba(0,0,0,0.5)', maxWidth: '700px', margin: '0 auto' }}>Selecione uma das salas disponíveis para o seu agendamento. Escolha por horários ou turnos de 4 horas.</p>
+          <p style={{ fontSize: '24px', color: 'rgba(0,0,0,0.5)', maxWidth: '700px', margin: '0 auto' }}>Selecione uma das salas disponíveis para o seu agendamento. Escolha por horários ou turnos de 5 horas.</p>
         </motion.section>
 
         {loading ? (
@@ -230,72 +318,93 @@ export default function Home() {
         )}
 
         <AnimatePresence>
-          {selectedRoom && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="modal-overlay" onClick={() => !isBooking && (setSelectedRoom(null), setBookingSuccess(false))}>
-              <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="modal-content" onClick={(e) => e.stopPropagation()}>
-                {bookingSuccess ? (
-                  <div style={{ textAlign: 'center', padding: '20px' }}>
-                    <div style={{ fontSize: '64px', marginBottom: '20px', color: '#34c759' }}>✓</div>
-                    <h2 style={{ fontSize: '28px', marginBottom: '8px' }}>Agendado com sucesso!</h2>
-                    <p style={{ color: 'rgba(0,0,0,0.4)' }}>Redirecionando para suas reservas...</p>
-                  </div>
-                ) : (
-                  <>
-                    <h2 style={{ fontSize: '28px', marginBottom: '12px', fontWeight: 600 }}>Agendar {selectedRoom.name}</h2>
-                    <div className="type-selector">
-                      <button className={`type-btn ${bookingType === 'hourly' ? 'active' : ''}`} onClick={() => setBookingType('hourly')}>HORA AVULSA</button>
-                      <button className={`type-btn ${bookingType === 'shift' ? 'active' : ''}`} onClick={() => setBookingType('shift')}>TURNO (4H)</button>
-                    </div>
+          {selectedRoom && (() => {
+            const roomTicket = user?.tickets?.find((t: any) => t.room_id === selectedRoom.id);
+            const hasZeroBalance = !roomTicket || (roomTicket.shift_tickets === 0 && roomTicket.hourly_tickets === 0);
 
-                    <div className="input-group" style={{ marginBottom: '20px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Data</label>
-                      <input type="date" className="input-field" value={date} onChange={(e) => setDate(e.target.value)} min={today} />
-                    </div>
-
-                    {bookingType === 'hourly' ? (
-                      <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Horário de Início</label>
-                          <select className="input-field" value={startTime} onChange={(e) => setStartTime(e.target.value)}>
-                            {hourlyOptions.map((hour) => {
-                              const isPastTime = date === today && parseInt(hour.split(':')[0]) < new Date().getHours() + 1;
-                              return <option key={hour} value={hour} disabled={isPastTime}>{hour}</option>;
-                            })}
-                          </select>
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Fim</label>
-                          <input type="time" className="input-field" value={endTime} readOnly />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="input-group" style={{ marginBottom: '20px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Turno</label>
-                        <select className="input-field" value={shift} onChange={(e) => setShift(e.target.value)}>
-                          {shiftOptions.map((opt) => {
-                            const endHour = parseInt(opt.value.split('-')[1].split(':')[0]);
-                            const isPastTime = date === today && endHour < new Date().getHours();
-                            return <option key={opt.value} value={opt.value} disabled={isPastTime}>{opt.label}</option>;
-                          })}
-                        </select>
-                      </div>
-                    )}
-
-                    <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontSize: '11px', color: 'rgba(0,0,0,0.3)', textTransform: 'uppercase', fontWeight: 600 }}>Total</div>
-                        <div style={{ fontSize: '24px', fontWeight: 700 }}>R${bookingType === 'hourly' ? selectedRoom.hourly_rate : selectedRoom.shift_rate}</div>
-                      </div>
-                      <button className="primary-btn" style={{ padding: '14px 40px', fontSize: '15px' }} onClick={handleBooking} disabled={isBooking}>
-                        {isBooking ? 'Agendando...' : 'Confirmar'}
+            return (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="modal-overlay" onClick={() => !isBooking && (setSelectedRoom(null), setBookingSuccess(false))}>
+                <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="modal-content" onClick={(e) => e.stopPropagation()}>
+                  {hasZeroBalance ? (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', position: 'relative' }}>
+                      <ZeroBalanceRedirect />
+                      <div style={{ fontSize: '48px', marginBottom: '24px' }}>💳</div>
+                      <h2 style={{ fontSize: '28px', marginBottom: '12px', fontWeight: 700, letterSpacing: '-0.02em' }}>Saldo R$ 0.00</h2>
+                      <p style={{ fontSize: '16px', color: 'rgba(0,0,0,0.6)', marginBottom: '32px', lineHeight: 1.5 }}>
+                        Você precisa adicionar saldo na sua conta para agendar a <strong>{selectedRoom.name}</strong>.<br /><br />
+                        Estamos te redirecionando para a loja...
+                      </p>
+                      <button className="primary-btn" style={{ width: '100%', padding: '16px', fontSize: '16px' }} onClick={() => router.push('/account')}>
+                        Comprar Saldos Agora
                       </button>
                     </div>
-                  </>
-                )}
-                <button onClick={() => { setSelectedRoom(null); setBookingSuccess(false); }} style={{ position: 'absolute', top: '24px', right: '24px', background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', opacity: 0.2 }}>✕</button>
+                  ) : bookingSuccess ? (
+                    <div style={{ textAlign: 'center', padding: '20px' }}>
+                      <div style={{ fontSize: '64px', marginBottom: '20px', color: '#34c759' }}>✓</div>
+                      <h2 style={{ fontSize: '28px', marginBottom: '8px' }}>Agendado com sucesso!</h2>
+                      <p style={{ color: 'rgba(0,0,0,0.4)' }}>Redirecionando para suas reservas...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <h2 style={{ fontSize: '28px', marginBottom: '12px', fontWeight: 600 }}>Agendar {selectedRoom.name}</h2>
+                      <div className="type-selector">
+                        <button className={`type-btn ${bookingType === 'hourly' ? 'active' : ''}`} onClick={() => setBookingType('hourly')}>HORA AVULSA</button>
+                        <button className={`type-btn ${bookingType === 'shift' ? 'active' : ''}`} onClick={() => setBookingType('shift')}>TURNO (5H)</button>
+                      </div>
+
+                      <div className="input-group" style={{ marginBottom: '20px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Data</label>
+                        <input type="date" className="input-field" value={date} onChange={(e) => setDate(e.target.value)} min={today} />
+                      </div>
+
+                      {bookingType === 'hourly' ? (
+                        <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Horário de Início</label>
+                            <select className="input-field" value={startTime} onChange={(e) => setStartTime(e.target.value)}>
+                              {currentHourlyOptions.map((hour) => {
+                                const isPastTime = date === today && parseInt(hour.split(':')[0]) <= new Date().getHours();
+                                return <option key={hour} value={hour} disabled={isPastTime}>{hour}</option>;
+                              })}
+                              {currentHourlyOptions.length === 0 && <option value="" disabled>Nenhum horário disponível hoje</option>}
+                            </select>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Fim</label>
+                            <input type="time" className="input-field" value={endTime} readOnly />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="input-group" style={{ marginBottom: '20px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Turno</label>
+                          <select className="input-field" value={shift} onChange={(e) => setShift(e.target.value)}>
+                            {currentShiftOptions.map((opt) => {
+                              // Nova Regra: O usuário não pode agendar um turno que já começou (startHour <= atual).
+                              const startHour = parseInt(opt.value.split('-')[0].split(':')[0]);
+                              const isPastTime = date === today && startHour <= new Date().getHours();
+                              return <option key={opt.value} value={opt.value} disabled={isPastTime}>{opt.label}</option>;
+                            })}
+                            {currentShiftOptions.length === 0 && <option value="" disabled>Nenhum turno disponível hoje</option>}
+                          </select>
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'rgba(0,0,0,0.3)', textTransform: 'uppercase', fontWeight: 600 }}>Total</div>
+                          <div style={{ fontSize: '24px', fontWeight: 700 }}>R${bookingType === 'hourly' ? selectedRoom.hourly_rate : selectedRoom.shift_rate}</div>
+                        </div>
+                        <button className="primary-btn" style={{ padding: '14px 40px', fontSize: '15px' }} onClick={handleBooking} disabled={isBooking}>
+                          {isBooking ? 'Agendando...' : 'Confirmar'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  <button onClick={() => { setSelectedRoom(null); setBookingSuccess(false); }} style={{ position: 'absolute', top: '24px', right: '24px', background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', opacity: 0.2 }}>✕</button>
+                </motion.div>
               </motion.div>
-            </motion.div>
-          )}
+            );
+          })()}
         </AnimatePresence>
       </main>
     </>
