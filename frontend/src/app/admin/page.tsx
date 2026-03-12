@@ -406,32 +406,38 @@ export default function AdminDashboard() {
   }, [manualBookingForm.room_id, manualBookingForm.date]);
 
   const manualHourlyOptions = useMemo(() => {
-     const room = rooms.find(r => r.id === manualBookingForm.room_id);
-     const isLocked = room && (room as any).locked_by_default;
-     return isLocked 
-       ? manualAvailableSlots.map(s => s.start)
-       : [
-          '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
-          '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
-          '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30',
-          '19:00','19:30','20:00','20:30','21:00','21:30','22:00'
-        ];
-  }, [manualAvailableSlots, manualBookingForm.room_id, rooms]);
+     if (manualAvailableSlots.length > 0) {
+        return manualAvailableSlots.map(s => s.start);
+     }
+     return [
+        '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+        '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+        '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30',
+        '19:00','19:30','20:00','20:30','21:00','21:30','22:00'
+      ];
+  }, [manualAvailableSlots]);
 
   const manualShiftOptions = useMemo(() => {
-     const room = rooms.find(r => r.id === manualBookingForm.room_id);
-     const isLocked = room && (room as any).locked_by_default;
-     return isLocked
-       ? manualAvailableSlots.map(s => ({ label: `${s.start} - ${s.end} (Libertado)`, value: `${s.start}-${s.end}` }))
-       : [
+     const ALL_SHIFTS = [
         { label: '07:00 - 12:00', value: '07:00-12:00' },
         { label: '08:00 - 13:00', value: '08:00-13:00' },
         { label: '13:00 - 18:00', value: '13:00-18:00' },
         { label: '14:00 - 19:00', value: '14:00-19:00' },
         { label: '15:00 - 20:00', value: '15:00-20:00' },
         { label: '18:00 - 23:00', value: '18:00-23:00' },
-      ];
-  }, [manualAvailableSlots, manualBookingForm.room_id, rooms]);
+     ];
+
+     return ALL_SHIFTS.filter(opt => {
+        const [start, end] = opt.value.split('-');
+        const startH = parseInt(start.split(':')[0]);
+        const endH = parseInt(end.split(':')[0]);
+        for (let h = startH; h < endH; h++) {
+           const checkTime = `${String(h).padStart(2, '0')}:00`;
+           if (!manualAvailableSlots.some(s => s.start === checkTime)) return false;
+        }
+        return true;
+     });
+  }, [manualAvailableSlots]);
 
   const handleCreateManualBooking = async (e: React.FormEvent) => {
     e.preventDefault();

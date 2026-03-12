@@ -16,15 +16,23 @@ export default function AccountPage() {
   const [copied, setCopied] = useState(false);
   const router = useRouter();
 
+  const [tickets, setTickets] = useState<any[]>([]);
+
   useEffect(() => {
     const fetchData = async () => {
       const savedUser = localStorage.getItem('roomrental_user');
       if (savedUser) {
-        setUser(JSON.parse(savedUser));
+        const parsedUser = JSON.parse(savedUser);
+        setUser(parsedUser);
         
         try {
-          const resRooms = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/rooms`);
-          const resPacks = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/packages`);
+          const [resRooms, resPacks, resMe] = await Promise.all([
+            fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/rooms`),
+            fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/packages`),
+            fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/users/me`, {
+              headers: { 'Authorization': `Bearer ${parsedUser.token || ''}` }
+            }),
+          ]);
           
           if (resRooms.ok && resPacks.ok) {
             const roomsData = await resRooms.json();
@@ -45,6 +53,11 @@ export default function AccountPage() {
               });
             });
             setPackages(grouped);
+          }
+
+          if (resMe.ok) {
+            const meData = await resMe.json();
+            setTickets(meData.tickets || []);
           }
         } catch (err) {
           console.error('Erro ao buscar salas/pacotes', err);
@@ -104,12 +117,28 @@ export default function AccountPage() {
       <main className="main-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingBottom: '100px' }}>
         <section style={{ marginBottom: '60px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', marginBottom: '12px', color: 'black' }}>
-            Comprar saldos.
+            Meus Pacotes.
           </h1>
           <p style={{ fontSize: '20px', color: 'rgba(0,0,0,0.5)' }}>
-            Faça a recarga de pacotes para o seu consultório de preferência.
+            Compre pacotes de horas e turnos para o seu consultório de preferência.
           </p>
         </section>
+
+        {/* Inventário de Tickets */}
+        {tickets.filter(t => t.hourly_tickets > 0 || t.shift_tickets > 0).length > 0 && (
+          <div style={{ width: '100%', maxWidth: '1000px', marginBottom: '40px', background: 'rgba(0,0,0,0.02)', borderRadius: '20px', padding: '28px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '16px' }}>Seu Inventário</div>
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+              {tickets.filter(t => t.hourly_tickets > 0 || t.shift_tickets > 0).map((t: any) => (
+                <div key={t.room_id} style={{ background: 'white', border: '1px solid rgba(0,0,0,0.08)', borderRadius: '16px', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', marginBottom: '4px' }}>{t.room_name}</div>
+                  {t.hourly_tickets > 0 && <div style={{ fontSize: '15px', fontWeight: 600 }}>🕐 {t.hourly_tickets} hora{t.hourly_tickets !== 1 ? 's' : ''} avulsa{t.hourly_tickets !== 1 ? 's' : ''}</div>}
+                  {t.shift_tickets > 0 && <div style={{ fontSize: '15px', fontWeight: 600 }}>📅 {t.shift_tickets} turno{t.shift_tickets !== 1 ? 's' : ''}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Room Tab Selectors */}
         <div style={{ display: 'flex', gap: '16px', background: 'rgba(0,0,0,0.03)', padding: '6px', borderRadius: '16px', marginBottom: '40px', flexWrap: 'wrap', justifyContent: 'center' }}>

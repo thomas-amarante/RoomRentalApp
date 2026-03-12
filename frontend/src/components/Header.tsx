@@ -60,7 +60,7 @@ export function Header() {
               transition: 'background 0.2s',
             }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'rgba(0,0,0,0.2)' }} />
-              R$ 0.00
+              Sem pacotes
             </span>
           </Link>
         </div>

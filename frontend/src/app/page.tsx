@@ -98,8 +98,12 @@ export default function Home() {
             let firstValidSlot = data[0];
 
             if (date === today) {
-              // Procurar o primeiro slot que seja > hora atual
-              const foundValid = data.find((s: { start: string, end: string }) => parseInt(s.start.split(':')[0]) > currentHour);
+              // Procurar o primeiro slot cujo início ainda não passou
+              const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+              const foundValid = data.find((s: { start: string, end: string }) => {
+                const [h, m] = s.start.split(':').map(Number);
+                return (h * 60 + m) > nowMinutes;
+              });
               if (foundValid) firstValidSlot = foundValid;
             }
 
@@ -117,28 +121,44 @@ export default function Home() {
   const isLocked = selectedRoom && (selectedRoom as any).locked_by_default;
 
   const currentHourlyOptions = useMemo(() => {
-    return isLocked
-      ? availableSlots.map(s => s.start)
-      : [
-        '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
-        '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
-        '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30',
-        '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'
-      ];
-  }, [isLocked, availableSlots]);
+    // Agora tanto salas normais quanto bloqueadas (Carina) retornam o mesmo formato da API:
+    // Uma lista de horários de início de 1h disponíveis.
+    if (availableSlots.length > 0) {
+      return availableSlots.map(s => s.start);
+    }
+    // Fallback estático caso demore o carregamento ou para salas padrão recém-abertas
+    return [
+      '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+      '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
+      '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30',
+      '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'
+    ];
+  }, [availableSlots]);
 
   const currentShiftOptions = useMemo(() => {
-    return isLocked
-      ? availableSlots.map(s => ({ label: `${s.start} - ${s.end} (Libertado)`, value: `${s.start}-${s.end}` }))
-      : [
-        { label: '07:00 - 12:00', value: '07:00-12:00' },
-        { label: '08:00 - 13:00', value: '08:00-13:00' },
-        { label: '13:00 - 18:00', value: '13:00-18:00' },
-        { label: '14:00 - 19:00', value: '14:00-19:00' },
-        { label: '15:00 - 20:00', value: '15:00-20:00' },
-        { label: '18:00 - 23:00', value: '18:00-23:00' },
-      ];
-  }, [isLocked, availableSlots]);
+    const ALL_SHIFTS = [
+      { label: '07:00 - 12:00', value: '07:00-12:00' },
+      { label: '08:00 - 13:00', value: '08:00-13:00' },
+      { label: '13:00 - 18:00', value: '13:00-18:00' },
+      { label: '14:00 - 19:00', value: '14:00-19:00' },
+      { label: '15:00 - 20:00', value: '15:00-20:00' },
+      { label: '18:00 - 23:00', value: '18:00-23:00' },
+    ];
+
+    // Para turnos, mostramos apenas se TODOS os blocos de hora cheia do turno estiverem livres
+    return ALL_SHIFTS.filter(opt => {
+      const [start, end] = opt.value.split('-');
+      const startH = parseInt(start.split(':')[0]);
+      const endH = parseInt(end.split(':')[0]);
+      
+      for (let h = startH; h < endH; h++) {
+        const checkTime = `${String(h).padStart(2, '0')}:00`;
+        // Se faltar um bloco de hora cheia no meio do turno, ele não está disponível
+        if (!availableSlots.some(s => s.start === checkTime)) return false;
+      }
+      return true;
+    });
+  }, [availableSlots]);
 
   const [startTime, setStartTime] = useState('07:00');
   const [endTime, setEndTime] = useState('08:00');
@@ -146,7 +166,7 @@ export default function Home() {
 
   // Ajusta automaticamente a hora inicial quando a data ou tipo de sala muda
   useEffect(() => {
-    if (!selectedRoom || isLocked) return; // Se for isLocked, o fetch da API já resolve
+    if (!selectedRoom) return;
 
     const currentHour = new Date().getHours();
 
@@ -196,34 +216,31 @@ export default function Home() {
     }
   }, [router]);
 
-  // Garante que o endTime seja calculado corretamente para salas bloqueadas vs padrão
+  // Garante que o endTime seja calculado corretamente
   useEffect(() => {
     if (bookingType === 'hourly' && startTime) {
-      if (isLocked) {
-        const slot = availableSlots.find(s => s.start === startTime);
-        if (slot) setEndTime(slot.end);
-      } else {
-        const [hours, minutes] = startTime.split(':').map(Number);
-        setEndTime(`${String(hours + 1).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
-      }
+      // Independentemente de ser bloqueada ou não, um agendamento 'hourly' deve setar o fim exato para 1 hora.
+      const [hours, minutes] = startTime.split(':').map(Number);
+      setEndTime(`${String(hours + 1).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
     }
-  }, [startTime, bookingType, isLocked, availableSlots]);
+  }, [startTime, bookingType]);
 
   const handleBooking = async () => {
     if (!selectedRoom || !user) return;
 
     // Validação Frontend extra no botão "Confirmar"
     if (date === today) {
-      const currentHour = new Date().getHours();
+      const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
       if (bookingType === 'hourly') {
-        const selectedHour = parseInt(startTime.split(':')[0]);
-        if (selectedHour <= currentHour) {
+        const [sh, sm] = startTime.split(':').map(Number);
+        if ((sh * 60 + sm) <= nowMinutes) {
           alert('Não é possível agendar um horário que já passou ou está em andamento na hora atual.');
           return;
         }
       } else {
-        const selectedStartHour = parseInt(shift.split('-')[0].split(':')[0]);
-        if (selectedStartHour <= currentHour) {
+        const shiftStart = shift.split('-')[0];
+        const [sh, sm] = shiftStart.split(':').map(Number);
+        if ((sh * 60 + sm) <= nowMinutes) {
           alert('Não é possível agendar um turno que já começou ou já passou na hora atual.');
           return;
         }
@@ -319,8 +336,24 @@ export default function Home() {
 
         <AnimatePresence>
           {selectedRoom && (() => {
-            const roomTicket = user?.tickets?.find((t: any) => t.room_id === selectedRoom.id);
-            const hasZeroBalance = !roomTicket || (roomTicket.shift_tickets === 0 && roomTicket.hourly_tickets === 0);
+            // Room IDs da hierarquia
+            const CARINA_ID  = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4';
+            const CONSUL1_ID = 'c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96';
+            const CONSUL2_ID = 'd93d2b37-3720-4298-b70b-aaf8a94acee0';
+            const eligibleSources: Record<string, string[]> = {
+              [CARINA_ID]:  [CARINA_ID],
+              [CONSUL1_ID]: [CONSUL1_ID, CARINA_ID],
+              [CONSUL2_ID]: [CONSUL2_ID, CONSUL1_ID, CARINA_ID],
+            };
+            const eligible = eligibleSources[selectedRoom.id] || [selectedRoom.id];
+            const eligibleTickets = (user?.tickets || []).filter((t: any) =>
+              eligible.includes(t.room_id) && (
+                bookingType === 'shift'
+                  ? t.shift_tickets > 0
+                  : t.hourly_tickets > 0
+              )
+            );
+            const hasZeroBalance = eligibleTickets.length === 0;
 
             return (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="modal-overlay" onClick={() => !isBooking && (setSelectedRoom(null), setBookingSuccess(false))}>
@@ -329,13 +362,18 @@ export default function Home() {
                     <div style={{ textAlign: 'center', padding: '40px 20px', position: 'relative' }}>
                       <ZeroBalanceRedirect />
                       <div style={{ fontSize: '48px', marginBottom: '24px' }}>💳</div>
-                      <h2 style={{ fontSize: '28px', marginBottom: '12px', fontWeight: 700, letterSpacing: '-0.02em' }}>Saldo R$ 0.00</h2>
+                      <h2 style={{ fontSize: '28px', marginBottom: '12px', fontWeight: 700, letterSpacing: '-0.02em' }}>
+                        {bookingType === 'shift' ? 'Sem turnos disponíveis' : 'Sem horas avulsas disponíveis'}
+                      </h2>
                       <p style={{ fontSize: '16px', color: 'rgba(0,0,0,0.6)', marginBottom: '32px', lineHeight: 1.5 }}>
-                        Você precisa adicionar saldo na sua conta para agendar a <strong>{selectedRoom.name}</strong>.<br /><br />
+                        {bookingType === 'shift'
+                          ? <>Você não possui <strong>turnos</strong> para agendar na <strong>{selectedRoom.name}</strong>. Adquira um pacote de turnos.</>
+                          : <>Você não possui <strong>horas avulsas</strong> para agendar na <strong>{selectedRoom.name}</strong>. Adquira um pacote de horas.</>
+                        }<br /><br />
                         Estamos te redirecionando para a loja...
                       </p>
                       <button className="primary-btn" style={{ width: '100%', padding: '16px', fontSize: '16px' }} onClick={() => router.push('/account')}>
-                        Comprar Saldos Agora
+                        Comprar Pacotes
                       </button>
                     </div>
                   ) : bookingSuccess ? (
@@ -352,40 +390,147 @@ export default function Home() {
                         <button className={`type-btn ${bookingType === 'shift' ? 'active' : ''}`} onClick={() => setBookingType('shift')}>TURNO (5H)</button>
                       </div>
 
+                      {/* Saldo disponível para o tipo selecionado */}
+                      {(() => {
+                        const allEligible = eligibleSources[selectedRoom.id] || [selectedRoom.id];
+                        const totalBalance = (user?.tickets || [])
+                          .filter((t: any) => allEligible.includes(t.room_id))
+                          .reduce((sum: number, t: any) =>
+                            sum + (bookingType === 'shift' ? t.shift_tickets : t.hourly_tickets), 0);
+                        if (totalBalance <= 0) return null;
+                        return (
+                          <div style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '6px',
+                            background: 'rgba(22,163,74,0.08)', color: '#16a34a',
+                            border: '1px solid rgba(22,163,74,0.2)',
+                            borderRadius: '20px', padding: '6px 14px',
+                            fontSize: '13px', fontWeight: 600, marginBottom: '20px'
+                          }}>
+                            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
+                            {bookingType === 'shift'
+                              ? `Saldo: ${totalBalance} turno${totalBalance !== 1 ? 's' : ''}`
+                              : `Saldo: ${totalBalance} hora${totalBalance !== 1 ? 's' : ''} avulsa${totalBalance !== 1 ? 's' : ''}`
+                            }
+                          </div>
+                        );
+                      })()}
+
                       <div className="input-group" style={{ marginBottom: '20px' }}>
                         <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Data</label>
                         <input type="date" className="input-field" value={date} onChange={(e) => setDate(e.target.value)} min={today} />
                       </div>
 
                       {bookingType === 'hourly' ? (
-                        <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
-                          <div style={{ flex: 1 }}>
-                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Horário de Início</label>
-                            <select className="input-field" value={startTime} onChange={(e) => setStartTime(e.target.value)}>
-                              {currentHourlyOptions.map((hour) => {
-                                const isPastTime = date === today && parseInt(hour.split(':')[0]) <= new Date().getHours();
-                                return <option key={hour} value={hour} disabled={isPastTime}>{hour}</option>;
-                              })}
-                              {currentHourlyOptions.length === 0 && <option value="" disabled>Nenhum horário disponível hoje</option>}
-                            </select>
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Fim</label>
-                            <input type="time" className="input-field" value={endTime} readOnly />
+                        <div style={{ marginBottom: '20px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '10px', display: 'block' }}>Horário de Início</label>
+                          {isFetchingAvailability ? (
+                            <div style={{ padding: '16px', textAlign: 'center', color: 'rgba(0,0,0,0.3)', fontSize: '13px' }}>Carregando horários...</div>
+                          ) : (() => {
+                            const ALL_SLOTS = [
+                              '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+                              '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+                              '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30',
+                              '19:00','19:30','20:00','20:30','21:00','21:30','22:00'
+                            ];
+                            const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+                            return (
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', maxHeight: '220px', overflowY: 'auto', padding: '2px', borderRadius: '12px' }}>
+                                {ALL_SLOTS.map(hour => {
+                                  const [h, m] = hour.split(':').map(Number);
+                                  const slotMinutes = h * 60 + m;
+                                  const isPast = date === today && slotMinutes <= nowMinutes;
+                                  const isAvailable = availableSlots.some(s => s.start === hour) && !isPast;
+                                  const isSelected = startTime === hour && isAvailable;
+                                  return (
+                                    <button
+                                      key={hour}
+                                      disabled={!isAvailable}
+                                      onClick={() => setStartTime(hour)}
+                                      style={{
+                                        padding: '8px 4px',
+                                        borderRadius: '10px',
+                                        border: isSelected ? '2px solid black' : `1px solid ${isAvailable ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.2)'}`,
+                                        background: isSelected ? 'black' : isAvailable ? 'rgba(22,163,74,0.06)' : 'rgba(239,68,68,0.04)',
+                                        color: isSelected ? 'white' : isAvailable ? '#16a34a' : '#dc2626',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        cursor: isAvailable ? 'pointer' : 'not-allowed',
+                                        textAlign: 'center',
+                                        transition: 'all 0.15s',
+                                        lineHeight: 1.3,
+                                        opacity: isPast ? 0.4 : 1,
+                                      }}
+                                    >
+                                      {hour}{!isAvailable && <><br/><span style={{ fontSize: '9px', fontWeight: 500 }}>Indisponível</span></>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                          <div style={{ display: 'flex', gap: '12px', marginTop: '10px', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} /> Disponível
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Indisponível
+                            </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="input-group" style={{ marginBottom: '20px' }}>
-                          <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Turno</label>
-                          <select className="input-field" value={shift} onChange={(e) => setShift(e.target.value)}>
-                            {currentShiftOptions.map((opt) => {
-                              // Nova Regra: O usuário não pode agendar um turno que já começou (startHour <= atual).
-                              const startHour = parseInt(opt.value.split('-')[0].split(':')[0]);
-                              const isPastTime = date === today && startHour <= new Date().getHours();
-                              return <option key={opt.value} value={opt.value} disabled={isPastTime}>{opt.label}</option>;
-                            })}
-                            {currentShiftOptions.length === 0 && <option value="" disabled>Nenhum turno disponível hoje</option>}
-                          </select>
+                        <div style={{ marginBottom: '20px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '10px', display: 'block' }}>Turno</label>
+                          {(() => {
+                            const ALL_SHIFTS = [
+                              { label: '07:00 - 12:00', value: '07:00-12:00' },
+                              { label: '08:00 - 13:00', value: '08:00-13:00' },
+                              { label: '13:00 - 18:00', value: '13:00-18:00' },
+                              { label: '14:00 - 19:00', value: '14:00-19:00' },
+                              { label: '15:00 - 20:00', value: '15:00-20:00' },
+                              { label: '18:00 - 23:00', value: '18:00-23:00' },
+                            ];
+                            const currentHour = new Date().getHours();
+                            return (
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', maxHeight: '200px', overflowY: 'auto', padding: '2px' }}>
+                                {ALL_SHIFTS.map(opt => {
+                                  const startHour = parseInt(opt.value.split('-')[0].split(':')[0]);
+                                  const isPast = date === today && startHour <= currentHour;
+                                  const isAvailable = currentShiftOptions.some(s => s.value === opt.value) && !isPast;
+                                  const isSelected = shift === opt.value && isAvailable;
+                                  return (
+                                    <button
+                                      key={opt.value}
+                                      disabled={!isAvailable}
+                                      onClick={() => setShift(opt.value)}
+                                      style={{
+                                        padding: '12px 8px',
+                                        borderRadius: '12px',
+                                        border: isSelected ? '2px solid black' : `1px solid ${isAvailable ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.2)'}`,
+                                        background: isSelected ? 'black' : isAvailable ? 'rgba(22,163,74,0.06)' : 'rgba(239,68,68,0.04)',
+                                        color: isSelected ? 'white' : isAvailable ? '#16a34a' : '#dc2626',
+                                        fontSize: '12px',
+                                        fontWeight: 600,
+                                        cursor: isAvailable ? 'pointer' : 'not-allowed',
+                                        textAlign: 'center',
+                                        transition: 'all 0.15s',
+                                        lineHeight: 1.3
+                                      }}
+                                    >
+                                      {opt.label}{!isAvailable && <><br/><span style={{ fontSize: '10px', fontWeight: 500 }}>Indisponível</span></>}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                          <div style={{ display: 'flex', gap: '12px', marginTop: '12px', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} /> Disponível
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>
+                              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Indisponível
+                            </div>
+                          </div>
                         </div>
                       )}
 

@@ -66,23 +66,21 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
 
         UNION ALL
 
-        -- Business Rule: Carina fixed Mondays 07:00 - 13:30
+        -- Business Rule: Carina Cigolini Fixed Schedule
         SELECT 
-          '0b5d4bf5-b66b-43bf-9575-0ca9925251f4'::uuid AS room_id,
-          (d.d + interval '7 hours') AS start_time,
-          (d.d + interval '13 hours 30 minutes') AS end_time
+          r.id AS room_id,
+          (d.d + (h.h || ':' || lpad(m.m::text, 2, '0') || ':00')::time)::timestamp AS start_time,
+          (d.d + (h.h || ':' || lpad(m.m::text, 2, '0') || ':00')::time + interval '1 hour')::timestamp AS end_time
         FROM days d
-        WHERE EXTRACT(ISODOW FROM d.d) = 1
-
-        UNION ALL
-
-        -- Business Rule: Carina fixed Wed/Fri 13:30 - 22:00
-        SELECT 
-          '0b5d4bf5-b66b-43bf-9575-0ca9925251f4'::uuid AS room_id,
-          (d.d + interval '13 hours 30 minutes') AS start_time,
-          (d.d + interval '22 hours') AS end_time
-        FROM days d
-        WHERE EXTRACT(ISODOW FROM d.d) IN (3, 5)
+        CROSS JOIN generate_series(7, 22) h(h)
+        CROSS JOIN (VALUES (0), (30)) m(m)
+        CROSS JOIN rooms r
+        WHERE r.id = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4'
+        AND (
+          (EXTRACT(ISODOW FROM d.d) = 1 AND (h.h * 60 + m.m) <= (12 * 60 + 30)) -- Mon until 13:30
+          OR 
+          (EXTRACT(ISODOW FROM d.d) IN (3, 5) AND (h.h * 60 + m.m) >= (13 * 60 + 30) AND (h.h * 60 + m.m) <= (22 * 60)) -- Wed/Fri from 13:30
+        )
       ),
       available_blocks AS (
         SELECT p.room_id, p.start_time
@@ -91,8 +89,8 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
           ON res.room_id = p.room_id 
           AND res.status != 'cancelled'
           AND tsrange(p.start_time, p.end_time) && res.booking_period
-        -- Only consider slots that are AT LEAST 30 mins in the future to avoid false hopes
-        WHERE res.id IS NULL AND p.start_time > (NOW() AT TIME ZONE 'America/Sao_Paulo') + interval '30 minutes'
+        -- Only consider slots that are in the future
+        WHERE res.id IS NULL AND p.start_time >= (NOW() AT TIME ZONE 'America/Sao_Paulo')
       ),
       first_available AS (
         SELECT room_id, MIN(start_time) as next_availability
@@ -131,34 +129,54 @@ app.get('/api/availability', async (req: Request, res: Response) => {
     const isLocked = roomCheck.rows[0].locked_by_default;
 
     if (isLocked) {
-      // Retorna apenas horários liberados ativamente pelo admin (que não tenham sido reservados)
+      // Retorna slots de 1h que estejam INTEIRAMENTE dentro de um bloco liberado e não reservado
       const query = `
-        WITH combined_slots AS (
+        WITH released AS (
+          -- Unificando com a mesma lógica de janelas do GET /api/rooms para evitar discrepâncias
           SELECT start_time, end_time, date 
           FROM released_slots 
           WHERE room_id = $1 AND date = $2
           
           UNION ALL
           
-          SELECT '07:00:00'::time, '13:30:00'::time, $2::date
-          WHERE $1 = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4' 
+          -- Monday: 07:00 to 13:30 (last slot starts at 12:30)
+          SELECT (h.h || ':' || lpad(m.m::text, 2, '0') || ':00')::time, (h.h || ':' || lpad(m.m::text, 2, '0') || ':00')::time + interval '1 hour', $2::date
+          FROM generate_series(7, 12) h(h)
+          CROSS JOIN (VALUES (0), (30)) m(m)
+          WHERE $1 = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4'
           AND EXTRACT(ISODOW FROM $2::date) = 1
+          AND (h.h * 60 + m.m) <= (12 * 60 + 30)
           
           UNION ALL
           
-          SELECT '13:30:00'::time, '22:00:00'::time, $2::date
-          WHERE $1 = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4' 
+          -- Wed/Fri: 13:30 to 23:00 (last slot starts at 22:00)
+          SELECT (h.h || ':' || lpad(m.m::text, 2, '0') || ':00')::time, (h.h || ':' || lpad(m.m::text, 2, '0') || ':00')::time + interval '1 hour', $2::date
+          FROM generate_series(13, 22) h(h)
+          CROSS JOIN (VALUES (0), (30)) m(m)
+          WHERE $1 = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4'
           AND EXTRACT(ISODOW FROM $2::date) IN (3, 5)
+          AND (h.h * 60 + m.m) >= (13 * 60 + 30)
+          AND (h.h * 60 + m.m) <= (22 * 60)
+        ),
+        possible_slots AS (
+          SELECT
+            ($2 || ' ' || lpad(h::text, 2, '0') || ':' || lpad(m::text, 2, '0') || ':00')::timestamp AS slot_start,
+            ($2 || ' ' || lpad(h::text, 2, '0') || ':' || lpad(m::text, 2, '0') || ':00')::timestamp + interval '1 hour' AS slot_end
+          FROM generate_series(7, 22) as h
+          CROSS JOIN (VALUES (0), (30)) as t(m)
+          WHERE NOT (h = 22 AND m = 30)
         )
-        SELECT cs.start_time, cs.end_time 
-        FROM combined_slots cs
+        SELECT 
+          ps.slot_start::time as start_time,
+          ps.slot_end::time as end_time
+        FROM possible_slots ps
+        INNER JOIN released r ON ps.slot_start::time >= r.start_time AND ps.slot_end::time <= r.end_time
         LEFT JOIN reservations res 
           ON res.room_id = $1 
           AND res.status != 'cancelled'
-          AND DATE(lower(res.booking_period)) = cs.date
-          AND cs.start_time::time = lower(res.booking_period)::time
+          AND tsrange(ps.slot_start, ps.slot_end) && res.booking_period
         WHERE res.id IS NULL
-        ORDER BY cs.start_time ASC
+        ORDER BY ps.slot_start ASC
       `;
       const result = await pool.query(query, [roomId, date]);
       const availableTimes = result.rows.map(row => ({
@@ -167,13 +185,15 @@ app.get('/api/availability', async (req: Request, res: Response) => {
       }));
       return res.json(availableTimes);
     } else {
-      // Sala Padrão: Rotina de horários comerciais estendida das 07h as 22h (fechando 23h)
+      // Sala Padrão: Rotina de horários comerciais estendida das 07h as 22h, incrementos de 30min
       const query = `
         WITH hourly_slots AS (
           SELECT
-            ($2 || ' ' || lpad(h::text, 2, '0') || ':00:00')::timestamp AS slot_start,
-            ($2 || ' ' || lpad((h+1)::text, 2, '0') || ':00:00')::timestamp AS slot_end
+            ($2 || ' ' || lpad(h::text, 2, '0') || ':' || lpad(m::text, 2, '0') || ':00')::timestamp AS slot_start,
+            ($2 || ' ' || lpad(h::text, 2, '0') || ':' || lpad(m::text, 2, '0') || ':00')::timestamp + interval '1 hour' AS slot_end
           FROM generate_series(7, 22) as h
+          CROSS JOIN (VALUES (0), (30)) as t(m)
+          WHERE NOT (h = 22 AND m = 30)
         )
         SELECT 
           hs.slot_start::time as start_time,
@@ -232,54 +252,108 @@ app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: R
     const roomCheck = await pool.query('SELECT locked_by_default FROM rooms WHERE id = $1', [room_id]);
     if (roomCheck.rows.length > 0 && roomCheck.rows[0].locked_by_default) {
       const lockDate = start_time.split(' ')[0];
-      const lockStartTime = start_time.split(' ')[1];
+      const lockStartTime = start_time.split(' ')[1]; // e.g. "20:00:00"
       const lockEndTime = end_time.split(' ')[1];
       
+      // 1. Check se há um slot explicitamente liberado pelo Admin
       const releaseCheck = await pool.query(
-        'SELECT id FROM released_slots WHERE room_id = $1 AND date = $2 AND start_time = $3 AND end_time = $4',
+        `SELECT id FROM released_slots 
+         WHERE room_id = $1 AND date = $2 
+         AND start_time <= $3::time AND end_time >= $4::time`,
         [room_id, lockDate, lockStartTime, lockEndTime]
       );
       
-      if (releaseCheck.rows.length === 0) {
+      let isAllowed = releaseCheck.rows.length > 0;
+      
+      // 2. Check da agenda fixa da Carina Cigolini (regra de negócio hardcoded)
+      if (!isAllowed && room_id === '0b5d4bf5-b66b-43bf-9575-0ca9925251f4') {
+        const dayOfWeekResult = await pool.query(
+          'SELECT EXTRACT(ISODOW FROM $1::date) as dow',
+          [lockDate]
+        );
+        const dow = parseInt(dayOfWeekResult.rows[0].dow);
+        const [startH, startM] = lockStartTime.split(':').map(Number);
+        const [endH, endM] = lockEndTime.split(':').map(Number);
+        const startMinutes = startH * 60 + startM;
+        const endMinutes = endH * 60 + endM;
+        
+        // Segunda (1): 07:00 às 13:30
+        if (dow === 1 && startMinutes >= 7 * 60 && endMinutes <= 13 * 60 + 30) {
+          isAllowed = true;
+        }
+        // Quarta (3) ou Sexta (5): 13:30 às 23:00
+        if ((dow === 3 || dow === 5) && startMinutes >= 13 * 60 + 30 && endMinutes <= 23 * 60) {
+          isAllowed = true;
+        }
+      }
+      
+      if (!isAllowed) {
         return res.status(403).json({ error: 'Este horário está bloqueado e não foi liberado pelo Administrador.' });
       }
     }
 
-    // DEDUÇÃO DE TICKETS - (Carteira Wallet Modelo Caminho B)
+    // ─── Hierarquia de Salas ────────────────────────────────────────────────
+    // Carina → pode reservar qualquer sala
+    // Consul.1 → pode reservar Consul.1 e Consul.2
+    // Consul.2 → só pode reservar Consul.2
+    const CARINA_ID  = '0b5d4bf5-b66b-43bf-9575-0ca9925251f4';
+    const CONSUL1_ID = 'c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96';
+    const CONSUL2_ID = 'd93d2b37-3720-4298-b70b-aaf8a94acee0';
+
+    // Salas cujos tickets podem ser usados para reservar o target room_id
+    const eligibleSourceRooms: Record<string, string[]> = {
+      [CARINA_ID]:  [CARINA_ID],
+      [CONSUL1_ID]: [CONSUL1_ID, CARINA_ID],
+      [CONSUL2_ID]: [CONSUL2_ID, CONSUL1_ID, CARINA_ID],
+    };
+    const eligible = eligibleSourceRooms[room_id] || [room_id];
+
+    // DEDUÇÃO DE TICKETS (com hierarquia)
     const reqStartObj = new Date(safeStartTime);
     const reqSafeEndTime = end_time.includes(' ') ? end_time.replace(' ', 'T') + '-03:00' : (!end_time.includes('-03:00') && !end_time.endsWith('Z') ? end_time + '-03:00' : end_time);
     const reqEndObj = new Date(reqSafeEndTime);
     const diffHours = (reqEndObj.getTime() - reqStartObj.getTime()) / (1000 * 60 * 60);
+    const isShift = diffHours >= 4;
 
-    const isShift = diffHours >= 4; // Turnos base começam por 5 horas ou turnos parciais de 4
-    
-    // Ler Estoque do Cliente neste Consultório
-    const ticketCheck = await pool.query(`SELECT hourly_tickets, shift_tickets FROM user_tickets WHERE user_id = $1 AND room_id = $2`, [user_id, room_id]);
-    
+    // Buscar tickets de todas as salas elegíveis, priorizando a própria sala
+    const ticketCheck = await pool.query(
+      `SELECT room_id, hourly_tickets, shift_tickets 
+       FROM user_tickets 
+       WHERE user_id = $1 AND room_id = ANY($2::uuid[])
+       ORDER BY (room_id = $3::uuid) DESC`, /* própria sala primeiro */
+      [user_id, eligible, room_id]
+    );
+
+    let sourceRoomId: string | null = null;
     let hasShiftTicket = false;
     let hasHourlyTickets = false;
     let finalStatus = 'pending';
     let finalPrice = total_price;
 
-    if (ticketCheck.rows.length > 0) {
-      if (isShift && ticketCheck.rows[0].shift_tickets > 0) {
+    for (const row of ticketCheck.rows) {
+      if (isShift && row.shift_tickets > 0) {
         hasShiftTicket = true;
-      } else if (!isShift && ticketCheck.rows[0].hourly_tickets >= diffHours) {
+        sourceRoomId = row.room_id;
+        break;
+      } else if (!isShift && row.hourly_tickets >= diffHours) {
         hasHourlyTickets = true;
+        sourceRoomId = row.room_id;
+        break;
       }
     }
 
-    if (hasShiftTicket) {
+    if (hasShiftTicket && sourceRoomId) {
       finalStatus = 'confirmed';
       finalPrice = 0;
-      await pool.query(`UPDATE user_tickets SET shift_tickets = shift_tickets - 1 WHERE user_id = $1 AND room_id = $2`, [user_id, room_id]);
-      console.log(`🎫 Ticket de Turno deduzido para usuário ${user_id} na sala ${room_id}`);
-    } else if (hasHourlyTickets) {
+      await pool.query(`UPDATE user_tickets SET shift_tickets = shift_tickets - 1 WHERE user_id = $1 AND room_id = $2`, [user_id, sourceRoomId]);
+      console.log(`🎫 Turno deduzido do pacote de ${sourceRoomId} para reserva em ${room_id}`);
+    } else if (hasHourlyTickets && sourceRoomId) {
       finalStatus = 'confirmed';
       finalPrice = 0;
-      await pool.query(`UPDATE user_tickets SET hourly_tickets = hourly_tickets - $3 WHERE user_id = $1 AND room_id = $2`, [user_id, room_id, diffHours]);
-      console.log(`🎫 ${diffHours} Tickets de Hora deduzidos para usuário ${user_id} na sala ${room_id}`);
+      await pool.query(`UPDATE user_tickets SET hourly_tickets = hourly_tickets - $3 WHERE user_id = $1 AND room_id = $2`, [user_id, sourceRoomId, diffHours]);
+      console.log(`🎫 ${diffHours}h deduzidas do pacote de ${sourceRoomId} para reserva em ${room_id}`);
     }
+
 
     const query = `
       INSERT INTO reservations (room_id, user_id, booking_period, total_price, status)
@@ -301,6 +375,53 @@ app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: R
     }
     console.error(err);
     res.status(500).json({ error: 'Erro ao processar reserva' });
+  }
+});
+
+// ROTA: Reagendamento de Reserva
+app.put('/api/reservations/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    const { start_time, end_time } = req.body;
+
+    if (!userId || !start_time || !end_time) {
+      return res.status(400).json({ error: 'Dados incompletos.' });
+    }
+
+    const existing = await pool.query(`SELECT * FROM reservations WHERE id = $1`, [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Reserva não encontrada.' });
+
+    const reservation = existing.rows[0];
+    if (reservation.user_id !== userId && !req.user?.is_admin) {
+      return res.status(403).json({ error: 'Sem permissão para alterar esta reserva.' });
+    }
+    if (reservation.status !== 'confirmed') {
+      return res.status(400).json({ error: 'Apenas reservas confirmadas podem ser reagendadas.' });
+    }
+
+    const safeStart = start_time.includes(' ') ? start_time.replace(' ', 'T') + '-03:00' : start_time;
+    const safeEnd = end_time.includes(' ') ? end_time.replace(' ', 'T') + '-03:00' : end_time;
+
+    const conflict = await pool.query(
+      `SELECT id FROM reservations 
+       WHERE room_id = $1 AND id != $2 AND status = 'confirmed'
+       AND booking_period && tsrange($3::timestamp, $4::timestamp)`,
+      [reservation.room_id, id, safeStart, safeEnd]
+    );
+    if (conflict.rows.length > 0) {
+      return res.status(400).json({ error: 'Este horário já está reservado por outro usuário.' });
+    }
+
+    const updated = await pool.query(
+      `UPDATE reservations SET booking_period = tsrange($1::timestamp, $2::timestamp) WHERE id = $3 RETURNING *`,
+      [safeStart, safeEnd, id]
+    );
+
+    res.json({ message: 'Reserva reagendada com sucesso!', reservation: updated.rows[0] });
+  } catch (err: any) {
+    console.error('Erro ao reagendar:', err);
+    res.status(500).json({ error: 'Erro ao reagendar reserva.' });
   }
 });
 
@@ -831,12 +952,14 @@ app.get('/api/users/me', authenticateToken, async (req: AuthRequest, res: Respon
     }
 
     const ticketsQuery = await pool.query(`
-      SELECT room_id, hourly_tickets, shift_tickets 
-      FROM user_tickets WHERE user_id = $1
+      SELECT ut.room_id, r.name as room_name, ut.hourly_tickets, ut.shift_tickets 
+      FROM user_tickets ut
+      JOIN rooms r ON ut.room_id = r.id
+      WHERE ut.user_id = $1
     `, [userId]);
 
     const user = userQuery.rows[0];
-    user.tickets = ticketsQuery.rows; // Array de {room_id, hourly_tickets, shift_tickets}
+    user.tickets = ticketsQuery.rows; // Array de {room_id, room_name, hourly_tickets, shift_tickets}
 
     res.json(user);
   } catch (error) {
