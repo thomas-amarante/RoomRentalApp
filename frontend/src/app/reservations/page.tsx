@@ -455,23 +455,39 @@ export default function Reservations() {
                     </div>
                   </div>
 
-                  {/* Botão Trocar Horário — apenas em reservas confirmadas futuras */}
+                  {/* Botão Trocar Horário — apenas em reservas confirmadas futuras com antecedência > 24h */}
                   {res.status === 'confirmed' && getEndMs(res) > now && (
                     <div style={{ padding: '0 24px 20px', borderTop: '1px solid rgba(0,0,0,0.05)', paddingTop: '16px' }}>
-                      <button
-                        onClick={() => {
-                          const getLocalDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
-                          setRescheduleReservation({ ...res, room_id: (res as any).room_id } as any);
-                          setRescheduleDate(getLocalDate());
-                          setRescheduleType('hourly');
-                          setRescheduleSuccess(false);
-                        }}
-                        style={{ width: '100%', background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.08)', borderRadius: '12px', padding: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'black', transition: 'background 0.2s' }}
-                        onMouseOver={e => e.currentTarget.style.background = 'rgba(0,0,0,0.08)'}
-                        onMouseOut={e => e.currentTarget.style.background = 'rgba(0,0,0,0.04)'}
-                      >
-                        🗓 Trocar Horário
-                      </button>
+                      {getStartMs(res) - now > 24 * 60 * 60 * 1000 ? (
+                        <button
+                          onClick={() => {
+                            const getLocalDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+                            setRescheduleReservation({ ...res, room_id: (res as any).room_id } as any);
+                            setRescheduleDate(getLocalDate());
+                            setRescheduleType('hourly');
+                            setRescheduleSuccess(false);
+                          }}
+                          style={{ width: '100%', background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.08)', borderRadius: '12px', padding: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: 'black', transition: 'background 0.2s' }}
+                          onMouseOver={e => e.currentTarget.style.background = 'rgba(0,0,0,0.08)'}
+                          onMouseOut={e => e.currentTarget.style.background = 'rgba(0,0,0,0.04)'}
+                        >
+                          🗓 Trocar Horário
+                        </button>
+                      ) : (
+                        <div style={{ 
+                          width: '100%', 
+                          background: 'rgba(0,0,0,0.02)', 
+                          border: '1px dashed rgba(0,0,0,0.1)', 
+                          borderRadius: '12px', 
+                          padding: '10px', 
+                          fontSize: '11px', 
+                          fontWeight: 500, 
+                          color: 'rgba(0,0,0,0.4)',
+                          textAlign: 'center'
+                        }}>
+                          Alteração bloqueada (limite de 24h)
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

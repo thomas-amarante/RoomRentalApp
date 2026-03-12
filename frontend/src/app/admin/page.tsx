@@ -105,6 +105,10 @@ export default function AdminDashboard() {
   const [isFetchingManualAvailability, setIsFetchingManualAvailability] = useState(false);
   const [isSubmittingManualBooking, setIsSubmittingManualBooking] = useState(false);
 
+  // Exclusive Rooms Availability
+  const [releaseAvailableSlots, setReleaseAvailableSlots] = useState<any[]>([]);
+  const [isFetchingReleaseAvailability, setIsFetchingReleaseAvailability] = useState(false);
+
   const router = useRouter();
 
   const fetchData = async () => {
@@ -404,6 +408,20 @@ export default function AdminDashboard() {
         setManualAvailableSlots([]);
     }
   }, [manualBookingForm.room_id, manualBookingForm.date]);
+
+  useEffect(() => {
+    if (releaseForm.room_id && releaseForm.date) {
+      setIsFetchingReleaseAvailability(true);
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/availability?roomId=${releaseForm.room_id}&date=${releaseForm.date}`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+            setReleaseAvailableSlots(Array.isArray(data) ? data : []);
+        })
+        .finally(() => setIsFetchingReleaseAvailability(false));
+    } else {
+        setReleaseAvailableSlots([]);
+    }
+  }, [releaseForm.room_id, releaseForm.date]);
 
   const manualHourlyOptions = useMemo(() => {
      if (manualAvailableSlots.length > 0) {
@@ -1042,6 +1060,57 @@ export default function AdminDashboard() {
                 </div>
                 <button type="submit" className="primary-btn" style={{ padding: '14px 24px' }}>Liberar Acesso</button>
               </form>
+
+              {releaseForm.room_id && releaseForm.date && (
+                <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid var(--border)' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '12px', display: 'block' }}>Visualização de Disponibilidade para esta Data</label>
+                  {isFetchingReleaseAvailability ? (
+                    <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(0,0,0,0.3)', fontSize: '14px' }}>Carregando agenda...</div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(70px, 1fr))', gap: '6px' }}>
+                        {[
+                          '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+                          '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+                          '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30',
+                          '19:00','19:30','20:00','20:30','21:00','21:30','22:00'
+                        ].map(h => {
+                          const isAvailable = releaseAvailableSlots.some(s => s.start === h);
+                          return (
+                            <div
+                              key={h}
+                              style={{
+                                padding: '6px 4px',
+                                borderRadius: '8px',
+                                border: `1px solid ${isAvailable ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.2)'}`,
+                                background: isAvailable ? 'rgba(22,163,74,0.06)' : 'rgba(239,68,68,0.04)',
+                                color: isAvailable ? '#16a34a' : '#dc2626',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                textAlign: 'center',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '2px'
+                              }}
+                            >
+                              <span>{h}</span>
+                              <span style={{ fontSize: '8px', opacity: 0.8 }}>{isAvailable ? 'Livre' : 'Ocupado'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: 'flex', gap: '12px', marginTop: '12px', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
+                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} /> Disponível (Livre)
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>
+                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Indisponível (Ocupado / Já Liberado)
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
@@ -1449,21 +1518,100 @@ export default function AdminDashboard() {
                   </div>
 
                   {manualBookingForm.room_id && manualBookingForm.date && (
-                    <div style={{ background: 'var(--secondary)', padding: '20px', borderRadius: '16px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Horário (Disponibilidade Real)</label>
+                    <div style={{ background: 'var(--secondary)', padding: '24px', borderRadius: '24px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '12px', display: 'block' }}>Horário (Disponibilidade Real)</label>
                       {isFetchingManualAvailability ? (
-                        <div style={{ fontSize: '14px', color: 'rgba(0,0,0,0.5)' }}>Buscando slots da agenda...</div>
+                        <div style={{ fontSize: '14px', color: 'rgba(0,0,0,0.5)', padding: '20px', textAlign: 'center' }}>Buscando slots da agenda...</div>
                       ) : (
                         manualBookingForm.type === 'hourly' ? (
-                          <select className="input-field" value={manualBookingForm.start_time} onChange={e => setManualBookingForm({...manualBookingForm, start_time: e.target.value})} required>
-                            {manualHourlyOptions.length > 0 ? manualHourlyOptions.map(opt => <option key={opt} value={opt}>{opt}</option>) : <option disabled>Sem horários</option>}
-                          </select>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', maxHeight: '200px', overflowY: 'auto', padding: '2px' }}>
+                            {[
+                              '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+                              '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+                              '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30',
+                              '19:00','19:30','20:00','20:30','21:00','21:30','22:00'
+                            ].map(h => {
+                              const isAvailable = manualAvailableSlots.some(s => s.start === h);
+                              const isSelected = manualBookingForm.start_time === h && isAvailable;
+                              return (
+                                <button
+                                  key={h}
+                                  type="button"
+                                  onClick={() => setManualBookingForm({...manualBookingForm, start_time: h})}
+                                  style={{
+                                    padding: '8px 4px',
+                                    borderRadius: '10px',
+                                    border: isSelected ? '2px solid black' : `1px solid ${isAvailable ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.2)'}`,
+                                    background: isSelected ? 'black' : isAvailable ? 'rgba(22,163,74,0.06)' : 'rgba(239,68,68,0.04)',
+                                    color: isSelected ? 'white' : isAvailable ? '#16a34a' : '#dc2626',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    textAlign: 'center',
+                                    transition: 'all 0.15s',
+                                    lineHeight: 1.3
+                                  }}
+                                >
+                                  {h}{!isAvailable && <><br/><span style={{ fontSize: '9px' }}>Indisponível</span></>}
+                                </button>
+                              );
+                            })}
+                          </div>
                         ) : (
-                          <select className="input-field" value={manualBookingForm.shift} onChange={e => setManualBookingForm({...manualBookingForm, shift: e.target.value})} required>
-                            {manualShiftOptions.length > 0 ? manualShiftOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>) : <option disabled>Sem horários</option>}
-                          </select>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                            {[
+                              { label: '07:00 - 12:00', value: '07:00-12:00' },
+                              { label: '08:00 - 13:00', value: '08:00-13:00' },
+                              { label: '13:00 - 18:00', value: '13:00-18:00' },
+                              { label: '14:00 - 19:00', value: '14:00-19:00' },
+                              { label: '15:00 - 20:00', value: '15:00-20:00' },
+                              { label: '18:00 - 23:00', value: '18:00-23:00' },
+                            ].map(opt => {
+                              // Reuso da lógica de disponibilidade de turno
+                              const [sHour, eHour] = opt.value.split('-').map(t => parseInt(t.split(':')[0]));
+                              let isAvailable = true;
+                              for(let hr = sHour; hr < eHour; hr++) {
+                                if (!manualAvailableSlots.some(s => s.start === `${String(hr).padStart(2,'0')}:00`)) {
+                                  isAvailable = false;
+                                  break;
+                                }
+                              }
+                              const isSelected = manualBookingForm.shift === opt.value && isAvailable;
+                              return (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => setManualBookingForm({...manualBookingForm, shift: opt.value})}
+                                  style={{
+                                    padding: '12px 8px',
+                                    borderRadius: '12px',
+                                    border: isSelected ? '2px solid black' : `1px solid ${isAvailable ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.2)'}`,
+                                    background: isSelected ? 'black' : isAvailable ? 'rgba(22,163,74,0.06)' : 'rgba(239,68,68,0.04)',
+                                    color: isSelected ? 'white' : isAvailable ? '#16a34a' : '#dc2626',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    textAlign: 'center',
+                                    transition: 'all 0.15s',
+                                    lineHeight: 1.3
+                                  }}
+                                >
+                                  {opt.label}{!isAvailable && <><br/><span style={{ fontSize: '10px' }}>Indisponível</span></>}
+                                </button>
+                              );
+                            })}
+                          </div>
                         )
                       )}
+                      
+                      <div style={{ display: 'flex', gap: '12px', marginTop: '16px', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
+                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} /> Disponível (Livre)
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>
+                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Indisponível (Ocupado)
+                        </div>
+                      </div>
                     </div>
                   )}
 
