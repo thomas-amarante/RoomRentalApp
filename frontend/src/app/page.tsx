@@ -61,7 +61,15 @@ export default function Home() {
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // Componente Auxiliar para Redirecionamento com Cleanup Seguro
   const ZeroBalanceRedirect = () => {
@@ -407,10 +415,11 @@ export default function Home() {
                             fontSize: '13px', fontWeight: 600, marginBottom: '20px'
                           }}>
                             <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
-                            {bookingType === 'shift'
-                              ? `Saldo: ${totalBalance} turno${totalBalance !== 1 ? 's' : ''}`
-                              : `Saldo: ${totalBalance} hora${totalBalance !== 1 ? 's' : ''} avulsa${totalBalance !== 1 ? 's' : ''}`
-                            }
+                            {isMobile ? 'Saldo disponível' : (
+                              bookingType === 'shift'
+                                ? `Saldo: ${totalBalance} turno${totalBalance !== 1 ? 's' : ''}`
+                                : `Saldo: ${totalBalance} hora${totalBalance !== 1 ? 's' : ''} avulsa${totalBalance !== 1 ? 's' : ''}`
+                            )}
                           </div>
                         );
                       })()}

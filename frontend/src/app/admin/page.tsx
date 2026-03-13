@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -58,17 +58,67 @@ export default function AdminDashboard() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'reservations' | 'revenue'>('revenue');
   const [nowUTC, setNowUTC] = useState(new Date());
+  const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [calendarRange, setCalendarRange] = useState<'week' | 'month'>('week');
+  const [roomsSubTab, setRoomsSubTab] = useState<'list' | 'exclusive'>('list');
+  const [exclusiveViewMode, setExclusiveViewMode] = useState<'table' | 'calendar'>('table');
+  const [selectedDayReservations, setSelectedDayReservations] = useState<AdminReservation[] | null>(null);
+  const [selectedDayLabel, setSelectedDayLabel] = useState<string>('');
 
   // Balance Management States
   const [balanceForm, setBalanceForm] = useState({ userId: '', roomId: '', hourlyTickets: 0, shiftTickets: 0 });
   const [isAddingBalance, setIsAddingBalance] = useState(false);
   const [usersBalances, setUsersBalances] = useState<any[]>([]);
+  
+  // Pivoted Balances for the table
+  const pivotedBalances = useMemo(() => {
+    const users: Record<string, any> = {};
+    usersBalances.forEach(ub => {
+      if (!users[ub.user_email]) {
+        users[ub.user_email] = {
+          name: ub.user_name,
+          email: ub.user_email,
+          rooms: {},
+          totalHourly: 0,
+          totalShift: 0
+        };
+      }
+      users[ub.user_email].rooms[ub.room_name] = {
+        hourly: ub.hourly_tickets,
+        shift: ub.shift_tickets
+      };
+      users[ub.user_email].totalHourly += ub.hourly_tickets;
+      users[ub.user_email].totalShift += ub.shift_tickets;
+    });
+    return Object.values(users).sort((a,b) => a.name.localeCompare(b.name));
+  }, [usersBalances]);
 
   // Timer para o countdown no admin
   useEffect(() => {
     const timer = setInterval(() => setNowUTC(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const [isAdminMobile, setIsAdminMobile] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const check = () => setIsAdminMobile(window.innerWidth < 1024); // Admin table is wider, so we use a larger breakpoint
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    if (tabsRef.current) {
+      const scrollAmount = 200;
+      tabsRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
 
   // Room Management States
   const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
@@ -500,140 +550,170 @@ export default function AdminDashboard() {
         setIsSubmittingManualBooking(false);
     }
   };
-
   return (
     <>
       <Header />
 
       <main className="main-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingBottom: '100px' }}>
         <section style={{ marginBottom: '40px', textAlign: 'center', width: '100%', maxWidth: '100vw', overflow: 'hidden' }}>
-          <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', marginBottom: '12px', color: 'black' }}>
-            {activeTab === 'reservations' ? 'Controle de agendamento' : activeTab === 'rooms' ? 'Gerenciar Salas' : activeTab === 'exclusive_rooms' ? 'Liberações Manuais' : 'Estatísticas de Usuários'}
-          </h1>
-          <div className="admin-tabs-container">
-            <button
-              onClick={() => setActiveTab('reservations')}
-              style={{
-                flexShrink: 0,
-                padding: '10px 24px',
-                borderRadius: '10px',
-                border: 'none',
-                background: activeTab === 'reservations' ? 'black' : 'transparent',
-                color: activeTab === 'reservations' ? 'white' : 'rgba(0,0,0,0.4)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: activeTab === 'reservations' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-                transition: 'all 0.2s'
-              }}
-            >
-              Agendamentos
-            </button>
-            <button
-              onClick={() => setActiveTab('add_balance')}
-              style={{
-                flexShrink: 0,
-                padding: '10px 24px',
-                borderRadius: '10px',
-                border: 'none',
-                background: activeTab === 'add_balance' ? 'black' : 'transparent',
-                color: activeTab === 'add_balance' ? 'white' : 'rgba(0,0,0,0.4)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: activeTab === 'add_balance' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-                transition: 'all 0.2s'
-              }}
-            >
-              Adicionar Saldo
-            </button>
-            <button
-              onClick={() => setActiveTab('rooms')}
-              style={{
-                flexShrink: 0,
-                padding: '10px 24px',
-                borderRadius: '10px',
-                border: 'none',
-                background: activeTab === 'rooms' ? 'black' : 'transparent',
-                color: activeTab === 'rooms' ? 'white' : 'rgba(0,0,0,0.4)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: activeTab === 'rooms' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-                transition: 'all 0.2s'
-              }}
-            >
-              Lista de Salas
-            </button>
-            <button
-              onClick={() => setActiveTab('exclusive_rooms')}
-              style={{
-                flexShrink: 0,
-                padding: '10px 24px',
-                borderRadius: '10px',
-                border: 'none',
-                background: activeTab === 'exclusive_rooms' ? 'black' : 'transparent',
-                color: activeTab === 'exclusive_rooms' ? 'white' : 'rgba(0,0,0,0.4)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: activeTab === 'exclusive_rooms' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-                transition: 'all 0.2s'
-              }}
-            >
-              Exclusivas (Aberturas)
-            </button>
-            <button
-              onClick={() => setActiveTab('users')}
-              style={{
-                flexShrink: 0,
-                padding: '10px 24px',
-                borderRadius: '10px',
-                border: 'none',
-                background: activeTab === 'users' ? 'black' : 'transparent',
-                color: activeTab === 'users' ? 'white' : 'rgba(0,0,0,0.4)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: activeTab === 'users' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-                transition: 'all 0.2s'
-              }}
-            >
-              Usuários (Ranking)
-            </button>
-            <button
-              onClick={() => setActiveTab('packages')}
-              style={{
-                flexShrink: 0,
-                padding: '10px 24px',
-                borderRadius: '10px',
-                border: 'none',
-                background: activeTab === 'packages' ? 'black' : 'transparent',
-                color: activeTab === 'packages' ? 'white' : 'rgba(0,0,0,0.4)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: activeTab === 'packages' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-                transition: 'all 0.2s'
-              }}
-            >
-              Pacotes (Loja PIX)
-            </button>
-            <Link
-              href="/admin/debug"
-              style={{
-                flexShrink: 0,
-                padding: '10px 24px',
-                borderRadius: '10px',
-                border: 'none',
-                background: 'transparent',
-                color: 'rgba(0,0,0,0.3)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                textDecoration: 'none',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                transition: 'all 0.2s'
-              }}
-            >
-              🛠️ Debug
-            </Link>
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%', maxWidth: '1200px', margin: '0 auto 24px', gap: '4px', padding: isAdminMobile ? '0 8px' : '0' }}>
+            {isAdminMobile && (
+              <button 
+                onClick={() => scrollTabs('left')}
+                style={{ 
+                  flexShrink: 0, 
+                  background: 'rgba(0,0,0,0.03)', 
+                  border: 'none', 
+                  width: '32px', 
+                  height: '32px', 
+                  borderRadius: '50%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  fontSize: '20px', 
+                  color: 'rgba(0,0,0,0.4)', 
+                  cursor: 'pointer' 
+                }}
+              >
+                ‹
+              </button>
+            )}
+            
+            <div className="admin-tabs-container" style={{ flex: 1 }} ref={tabsRef}>
+              <button
+                onClick={() => setActiveTab('reservations')}
+                style={{
+                  flexShrink: 0,
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: activeTab === 'reservations' ? 'black' : 'transparent',
+                  color: activeTab === 'reservations' ? 'white' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'reservations' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Agendamentos
+              </button>
+              <button
+                onClick={() => setActiveTab('add_balance')}
+                style={{
+                  flexShrink: 0,
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: activeTab === 'add_balance' ? 'black' : 'transparent',
+                  color: activeTab === 'add_balance' ? 'white' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'add_balance' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Adicionar Saldo
+              </button>
+              <button
+                onClick={() => setActiveTab('rooms')}
+                style={{
+                  flexShrink: 0,
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: activeTab === 'rooms' ? 'black' : 'transparent',
+                  color: activeTab === 'rooms' ? 'white' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'rooms' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Lista de Salas
+              </button>
+              <button
+                onClick={() => setActiveTab('users')}
+                style={{
+                  flexShrink: 0,
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: activeTab === 'users' ? 'black' : 'transparent',
+                  color: activeTab === 'users' ? 'white' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'users' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Usuários (Ranking)
+              </button>
+              <button
+                onClick={() => setActiveTab('packages')}
+                style={{
+                  flexShrink: 0,
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: activeTab === 'packages' ? 'black' : 'transparent',
+                  color: activeTab === 'packages' ? 'white' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'packages' ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Pacotes (Loja PIX)
+              </button>
+              <Link
+                href="/admin/debug"
+                style={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  color: 'rgba(0,0,0,0.3)',
+                  textDecoration: 'none',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  transition: 'all 0.2s'
+                }}
+              >
+                📟 Debug
+              </Link>
+            </div>
+
+            {isAdminMobile && (
+              <button 
+                onClick={() => scrollTabs('right')}
+                style={{ 
+                  flexShrink: 0, 
+                  background: 'rgba(0,0,0,0.03)', 
+                  border: 'none', 
+                  width: '32px', 
+                  height: '32px', 
+                  borderRadius: '50%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  fontSize: '20px', 
+                  color: 'rgba(0,0,0,0.4)', 
+                  cursor: 'pointer' 
+                }}
+              >
+                ›
+              </button>
+            )}
           </div>
+          <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', margin: '0 auto', color: 'black' }}>
+            {activeTab === 'reservations' ? 'Sala de controle' : 
+             activeTab === 'rooms' ? (roomsSubTab === 'list' ? 'Gerenciar Salas' : 'Liberações Manuais - Carina Cigolini') : 
+             activeTab === 'add_balance' ? 'Gerenciar Créditos' :
+             activeTab === 'packages' ? 'Gestão de Pacotes' :
+             activeTab === 'users' ? 'Estatísticas de Usuários' :
+             'Sala de controle'}
+          </h1>
         </section>
 
         {activeTab === 'reservations' ? (
@@ -720,7 +800,65 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '24px', width: '100%' }}>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              marginBottom: '24px', 
+              width: '100%', 
+              gap: '12px', 
+              flexDirection: isAdminMobile ? 'column-reverse' : 'row',
+              alignItems: isAdminMobile ? 'stretch' : 'center'
+            }}>
+                  <div style={{ 
+                    display: 'flex', 
+                    background: 'rgba(0,0,0,0.05)', 
+                    padding: '4px', 
+                    borderRadius: '12px',
+                    width: isAdminMobile ? '100%' : 'auto'
+                  }}>
+                    <button
+                      onClick={() => setViewMode('table')}
+                      style={{
+                        flex: isAdminMobile ? 1 : 'none',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: viewMode === 'table' ? 'white' : 'transparent',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        boxShadow: viewMode === 'table' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      📋 Tabela
+                    </button>
+                    <button
+                      onClick={() => setViewMode('calendar')}
+                      style={{
+                        flex: isAdminMobile ? 1 : 'none',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: viewMode === 'calendar' ? 'white' : 'transparent',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        boxShadow: viewMode === 'calendar' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      🗓️ Calendário
+                    </button>
+                  </div>
                   <button
                     onClick={() => setIsManualBookingModalOpen(true)}
                     style={{
@@ -740,7 +878,7 @@ export default function AdminDashboard() {
 
             {loading ? (
               <div style={{ textAlign: 'center', color: 'rgba(0,0,0,0.2)' }}>Carregando dados...</div>
-            ) : (
+            ) : viewMode === 'table' ? (
               <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
                   <thead>
@@ -855,71 +993,646 @@ export default function AdminDashboard() {
                   </tbody>
                 </table>
               </div>
+            ) : (
+              <div style={{ width: '100%', background: 'white', borderRadius: isAdminMobile ? '12px' : '24px', border: '1px solid var(--border)', padding: isAdminMobile ? '12px' : '24px', minHeight: '600px', overflowX: 'hidden' }}>
+                {/* Calendar Navigation */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+                  <div style={{ display: 'flex', gap: '8px', width: isAdminMobile ? '100%' : 'auto', justifyContent: 'center' }}>
+                    <button 
+                      onClick={() => {
+                        const d = new Date(calendarDate);
+                        if (calendarRange === 'week') {
+                          d.setDate(d.getDate() - 7);
+                        } else {
+                          d.setMonth(d.getMonth() - 1);
+                        }
+                        setCalendarDate(d);
+                      }}
+                      style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                    >
+                      ←
+                    </button>
+                    <button 
+                      onClick={() => setCalendarDate(new Date())}
+                      style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                    >
+                      Hoje
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const d = new Date(calendarDate);
+                        if (calendarRange === 'week') {
+                          d.setDate(d.getDate() + 7);
+                        } else {
+                          d.setMonth(d.getMonth() + 1);
+                        }
+                        setCalendarDate(d);
+                      }}
+                      style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                    >
+                      →
+                    </button>
+                  </div>
+
+                  <h3 style={{ fontSize: '20px', fontWeight: 700, margin: 0, textAlign: 'center', flex: 1 }}>
+                    {calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase()}
+                  </h3>
+
+                  <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', padding: '4px', borderRadius: '10px' }}>
+                    <button
+                      onClick={() => setCalendarRange('week')}
+                      style={{
+                        padding: '6px 14px', borderRadius: '7px', border: 'none',
+                        background: calendarRange === 'week' ? 'white' : 'transparent',
+                        fontWeight: 600, fontSize: '12px', cursor: 'pointer',
+                        boxShadow: calendarRange === 'week' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none'
+                      }}
+                    >
+                      Semana
+                    </button>
+                    <button
+                      onClick={() => setCalendarRange('month')}
+                      style={{
+                        padding: '6px 14px', borderRadius: '7px', border: 'none',
+                        background: calendarRange === 'month' ? 'white' : 'transparent',
+                        fontWeight: 600, fontSize: '12px', cursor: 'pointer',
+                        boxShadow: calendarRange === 'month' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none'
+                      }}
+                    >
+                      Mês
+                    </button>
+                  </div>
+                </div>
+
+                {calendarRange === 'week' ? (
+                  /* Calendar Grid (Week) */
+                  <div style={{ width: '100%', overflowX: 'auto', borderRadius: '12px', border: '1px solid #eee' }}>
+                    <div style={{ minWidth: isAdminMobile ? '750px' : 'auto' }}>
+                      {/* Days Header */}
+                      <div style={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: isAdminMobile ? '50px repeat(7, 100px)' : '80px repeat(7, 1fr)', 
+                        borderBottom: '1px solid #eee', 
+                        background: '#fafafa',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 20
+                      }}>
+                        <div style={{ padding: '15px' }} />
+                        {(() => {
+                          const curr = new Date(calendarDate);
+                          const day = curr.getDay();
+                          const diff = curr.getDate() - day + (day === 0 ? -6 : 1);
+                          const monday = new Date(curr.setDate(diff));
+                          
+                          return Array.from({length: 7}).map((_, i) => {
+                            const date = new Date(monday);
+                            date.setDate(monday.getDate() + i);
+                            const isToday = date.toDateString() === new Date().toDateString();
+                            return (
+                              <div key={i} style={{ padding: '15px 5px', textAlign: 'center', borderLeft: '1px solid #eee' }}>
+                                <div style={{ fontSize: '10px', fontWeight: 800, color: 'rgba(0,0,0,0.3)', textTransform: 'uppercase', marginBottom: '4px' }}>
+                                  {date.toLocaleDateString('pt-BR', { weekday: 'short' })}
+                                </div>
+                                <div style={{ 
+                                  fontSize: '16px', 
+                                  fontWeight: 700, 
+                                  color: isToday ? 'white' : 'black',
+                                  background: isToday ? '#0071e3' : 'transparent',
+                                  width: '28px',
+                                  height: '28px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  borderRadius: '50%',
+                                  margin: '4px auto 0'
+                                }}>
+                                  {date.getDate()}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+
+                      <div style={{ height: '700px', overflowY: 'auto', position: 'relative', minWidth: isAdminMobile ? '750px' : 'auto' }}>
+                        {[7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22].map(hour => (
+                          <div key={hour} style={{ display: 'grid', gridTemplateColumns: isAdminMobile ? '50px repeat(7, 100px)' : '80px repeat(7, 1fr)', height: '60px', borderBottom: '1px dotted #eee' }}>
+                            <div style={{ fontSize: '11px', color: 'rgba(0,0,0,0.3)', fontWeight: 600, padding: '10px', textAlign: 'right' }}>
+                              {String(hour).padStart(2, '0')}:00
+                            </div>
+                            {[0,1,2,3,4,5,6].map(day => (
+                              <div key={day} style={{ borderLeft: '1px solid #eee', position: 'relative' }} />
+                            ))}
+                          </div>
+                        ))}
+
+                        {/* Overlays (Reservations) */}
+                        {(() => {
+                          const curr = new Date(calendarDate);
+                          const day = curr.getDay();
+                          const diff = curr.getDate() - day + (day === 0 ? -6 : 1);
+                          const weekStart = new Date(curr.setDate(diff));
+                          weekStart.setHours(0,0,0,0);
+                          const weekEnd = new Date(weekStart);
+                          weekEnd.setDate(weekEnd.getDate() + 7);
+
+                          return reservations
+                            .filter(res => {
+                              if (res.status === 'cancelled') return false;
+                              if (selectedRoom && res.room_name !== selectedRoom) return false;
+                              if (selectedProfessional && res.user_name !== selectedProfessional) return false;
+                              
+                              const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
+                              const startStr = cleanStr.split(',')[0];
+                              const resDate = getSafeDate(startStr);
+                              return resDate >= weekStart && resDate < weekEnd;
+                            })
+                            .map(res => {
+                              const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
+                              const [startStr, endStr] = cleanStr.split(',');
+                              const start = getSafeDate(startStr);
+                              const end = getSafeDate(endStr);
+                              
+                              const dayIndex = (start.getDay() + 6) % 7; // Monday = 0
+                              const startHour = start.getHours() + start.getMinutes() / 60;
+                              const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+                              
+                              const top = (startHour - 7) * 60; 
+                              const height = duration * 60;
+                              const left = isAdminMobile 
+                                 ? `calc(50px + 100px * ${dayIndex})`
+                                 : `calc(80px + (100% - 80px) / 7 * ${dayIndex})`;
+                               const width = isAdminMobile ? '100px' : `calc((100% - 80px) / 7)`;
+
+                               return (
+                                 <div
+                                   key={res.id}
+                                   style={{
+                                     position: 'absolute',
+                                     top: `${top}px`,
+                                     left: left,
+                                     width: width,
+                                     height: `${height}px`,
+                                     padding: '2px',
+                                     zIndex: 10
+                                   }}
+                                 >
+                                  <div 
+                                    onClick={() => alert(`Reserva: ${res.user_name}\nSala: ${res.room_name}\nStatus: ${res.status.toUpperCase()}\nValor: R$ ${Number(res.total_price).toFixed(2)}`)}
+                                    style={{
+                                      background: res.status === 'confirmed' ? 'rgba(52,199,89,0.1)' : 'rgba(255,149,0,0.1)',
+                                      border: `1px solid ${res.status === 'confirmed' ? '#34c759' : '#ff9500'}`,
+                                      borderLeft: `4px solid ${res.status === 'confirmed' ? '#34c759' : '#ff9500'}`,
+                                      borderRadius: '6px',
+                                      height: '100%',
+                                      padding: '6px 8px',
+                                      overflow: 'hidden',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.2s',
+                                      boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      justifyContent: height < 40 ? 'center' : 'flex-start'
+                                    }}
+                                    title={`${res.user_name} - ${res.room_name}`}
+                                  >
+                                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'black', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {res.user_name}
+                                    </div>
+                                    {height >= 35 && (
+                                      <div style={{ fontSize: '10px', fontWeight: 500, color: 'rgba(0,0,0,0.5)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {res.room_name}
+                                      </div>
+                                    )}
+                                    {height >= 50 && (
+                                      <div style={{ fontSize: '10px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', marginTop: 'auto' }}>
+                                        {start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            });
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Calendar Grid (Month) */
+                  <div style={{ width: '100%' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: '#eee', border: '1px solid #eee', borderRadius: '12px', overflow: 'hidden' }}>
+                      {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map(d => (
+                        <div key={d} style={{ background: '#fafafa', padding: '12px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.3)', textTransform: 'uppercase' }}>
+                          {d}
+                        </div>
+                      ))}
+                      {(() => {
+                        const year = calendarDate.getFullYear();
+                        const month = calendarDate.getMonth();
+                        const firstDay = new Date(year, month, 1);
+                        const lastDay = new Date(year, month + 1, 0);
+                        
+                        // Get padding for start of month
+                        let startPadding = firstDay.getDay(); // 0 is Sunday
+                        startPadding = startPadding === 0 ? 6 : startPadding - 1; // 0 is Monday
+                        
+                        const days = [];
+                        // Prev month days
+                        const prevLastDay = new Date(year, month, 0).getDate();
+                        for (let i = startPadding - 1; i >= 0; i--) {
+                          days.push({ day: prevLastDay - i, month: 'prev' });
+                        }
+                        // Current month days
+                        for (let i = 1; i <= lastDay.getDate(); i++) {
+                          days.push({ day: i, month: 'curr' });
+                        }
+                        // Next month days
+                        const remaining = 42 - days.length;
+                        for (let i = 1; i <= remaining; i++) {
+                          days.push({ day: i, month: 'next' });
+                        }
+
+                        return days.map((d, i) => {
+                          const dateObj = new Date(year, month + (d.month === 'prev' ? -1 : d.month === 'next' ? 1 : 0), d.day);
+                          const isToday = dateObj.toDateString() === new Date().toDateString();
+                          
+                          const dayReservations = reservations.filter(res => {
+                             if (res.status === 'cancelled') return false;
+                             if (selectedRoom && res.room_name !== selectedRoom) return false;
+                             if (selectedProfessional && res.user_name !== selectedProfessional) return false;
+                             const startStr = res.booking_period.replace(/[\"\[\)]/g, '').split(',')[0];
+                             const resDate = getSafeDate(startStr);
+                             return resDate.toDateString() === dateObj.toDateString();
+                          });
+                          return (
+                            <div 
+                              key={i} 
+                              onClick={() => {
+                                if (dayReservations.length > 0) {
+                                  setSelectedDayReservations(dayReservations);
+                                  setSelectedDayLabel(dateObj.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }));
+                                }
+                              }}
+                              style={{ 
+                                background: 'white', 
+                                minHeight: isAdminMobile ? '60px' : '120px', 
+                                padding: isAdminMobile ? '4px' : '8px', 
+                                opacity: d.month === 'curr' ? 1 : 0.4,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: isAdminMobile ? 'center' : 'flex-start',
+                                position: 'relative',
+                                cursor: dayReservations.length > 0 ? 'pointer' : 'default',
+                                transition: 'all 0.2s'
+                              }}>
+                              <div style={{ 
+                                fontSize: isAdminMobile ? '12px' : '14px', 
+                                fontWeight: 700, 
+                                color: isToday ? 'white' : 'black',
+                                background: isToday ? 'black' : 'transparent',
+                                width: isAdminMobile ? '20px' : '24px',
+                                height: isAdminMobile ? '20px' : '24px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: '50%',
+                                marginBottom: isAdminMobile ? '4px' : '8px'
+                              }}>
+                                {d.day}
+                              </div>
+                              
+                              {isAdminMobile ? (
+                                dayReservations.length > 0 && (
+                                  <div style={{ 
+                                    width: '6px', 
+                                    height: '6px', 
+                                    borderRadius: '50%', 
+                                    background: '#34c759',
+                                    marginTop: '2px'
+                                  }} />
+                                )
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '100%' }}>
+                                  {dayReservations.slice(0, 4).map(res => (
+                                    <div 
+                                      key={res.id}
+                                      onClick={() => alert(`Reserva: ${res.user_name}\nSala: ${res.room_name}\nStatus: ${res.status.toUpperCase()}`)}
+                                      style={{
+                                        fontSize: '9px',
+                                        fontWeight: 600,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        background: res.status === 'confirmed' ? 'rgba(52,199,89,0.1)' : 'rgba(255,149,0,0.1)',
+                                        color: res.status === 'confirmed' ? '#248a3d' : '#e67e00',
+                                        borderLeft: `2px solid ${res.status === 'confirmed' ? '#34c759' : '#ff9500'}`,
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      {res.user_name.split(' ')[0]}
+                                    </div>
+                                  ))}
+                                  {dayReservations.length > 4 && (
+                                    <div style={{ fontSize: '8px', color: 'rgba(0,0,0,0.4)', textAlign: 'center', fontWeight: 600 }}>
+                                      +{dayReservations.length - 4} mais
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Legend */}
+                <div style={{ marginTop: '24px', display: 'flex', gap: '20px', fontSize: '12px', color: 'rgba(0,0,0,0.5)', fontWeight: 600 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(52,199,89,0.2)', border: '1px solid #34c759' }} /> Confirmado
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(255,149,0,0.2)', border: '1px solid #ff9500' }} /> Pendente
+                  </div>
+                </div>
+              </div>
             )}
           </>
         ) : activeTab === 'rooms' ? (
-          <div style={{ width: '100%' }}>
-            <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
-                    <th style={{ padding: '20px' }}>NOME DA SALA</th>
-                    <th style={{ padding: '20px' }}>VALOR/HORA</th>
-                    <th style={{ padding: '20px' }}>VALOR/TURNO (4H)</th>
-                    <th style={{ padding: '20px' }}>CAPACIDADE</th>
-                    <th style={{ padding: '20px' }}>AÇÕES</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rooms.map((room) => (
-                    <tr key={room.id} style={{ borderBottom: '1px solid var(--border)', fontSize: '14px', color: 'black' }}>
-                      <td style={{ padding: '20px' }}>
-                        <div style={{ fontWeight: 600 }}>{room.name}</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {room.description}
-                        </div>
-                      </td>
-                      <td style={{ padding: '20px', fontWeight: 600 }}>R$ {Number(room.hourly_rate).toFixed(2)}</td>
-                      <td style={{ padding: '20px', fontWeight: 600 }}>R$ {Number(room.shift_rate).toFixed(2)}</td>
-                      <td style={{ padding: '20px' }}>{room.capacity} pessoas</td>
-                      <td style={{ padding: '20px' }}>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
-                            onClick={() => handleOpenRoomModal(room)}
-                            style={{
-                              background: 'var(--secondary)',
-                              border: 'none',
-                              padding: '6px 12px',
-                              borderRadius: '8px',
-                              fontSize: '11px',
-                              cursor: 'pointer',
-                              fontWeight: 600
-                            }}
-                          >
-                            EDITAR
-                          </button>
-                          <button
-                            onClick={() => room.id && handleDeleteRoom(room.id)}
-                            style={{
-                              background: 'transparent',
-                              border: '1px solid rgba(0,0,0,0.1)',
-                              color: 'rgba(0,0,0,0.4)',
-                              padding: '6px 12px',
-                              borderRadius: '8px',
-                              fontSize: '11px',
-                              cursor: 'pointer',
-                              fontWeight: 600
-                            }}
-                          >
-                            EXCLUIR
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            {/* Submenu for Rooms */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '32px', background: 'rgba(0,0,0,0.05)', padding: '4px', borderRadius: '12px', width: isAdminMobile ? '100%' : 'auto' }}>
+              <button
+                onClick={() => setRoomsSubTab('list')}
+                style={{
+                  flex: isAdminMobile ? 1 : 'none',
+                  padding: '10px 24px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: roomsSubTab === 'list' ? 'white' : 'transparent',
+                  color: roomsSubTab === 'list' ? 'black' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: roomsSubTab === 'list' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.2s',
+                  fontSize: isAdminMobile ? '12px' : '14px'
+                }}
+              >
+                Todas as Salas
+              </button>
+              <button
+                onClick={() => setRoomsSubTab('exclusive')}
+                style={{
+                  flex: isAdminMobile ? 1 : 'none',
+                  padding: '10px 24px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: roomsSubTab === 'exclusive' ? 'white' : 'transparent',
+                  color: roomsSubTab === 'exclusive' ? 'black' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: roomsSubTab === 'exclusive' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.2s',
+                  fontSize: isAdminMobile ? '12px' : '14px'
+                }}
+              >
+                Liberações manuais
+              </button>
             </div>
+
+            {roomsSubTab === 'list' ? (
+              <div style={{ width: '100%' }}>
+                <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
+                        <th style={{ padding: '20px' }}>NOME DA SALA</th>
+                        <th style={{ padding: '20px' }}>VALOR/HORA</th>
+                        <th style={{ padding: '20px' }}>VALOR/TURNO (4H)</th>
+                        <th style={{ padding: '20px' }}>CAPACIDADE</th>
+                        <th style={{ padding: '20px' }}>AÇÕES</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rooms.map((room) => (
+                        <tr key={room.id} style={{ borderBottom: '1px solid var(--border)', fontSize: '14px', color: 'black' }}>
+                          <td style={{ padding: '20px' }}>
+                            <div style={{ fontWeight: 600 }}>{room.name}</div>
+                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {room.description}
+                            </div>
+                          </td>
+                          <td style={{ padding: '20px', fontWeight: 600 }}>R$ {Number(room.hourly_rate).toFixed(2)}</td>
+                          <td style={{ padding: '20px', fontWeight: 600 }}>R$ {Number(room.shift_rate).toFixed(2)}</td>
+                          <td style={{ padding: '20px' }}>{room.capacity} pessoas</td>
+                          <td style={{ padding: '20px' }}>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                onClick={() => handleOpenRoomModal(room)}
+                                style={{
+                                  background: 'var(--secondary)',
+                                  border: 'none',
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  fontSize: '11px',
+                                  cursor: 'pointer',
+                                  fontWeight: 600
+                                }}
+                              >
+                                EDITAR
+                              </button>
+                              <button
+                                onClick={() => room.id && handleDeleteRoom(room.id)}
+                                style={{
+                                  background: 'transparent',
+                                  border: '1px solid rgba(0,0,0,0.1)',
+                                  color: 'rgba(0,0,0,0.4)',
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  fontSize: '11px',
+                                  cursor: 'pointer',
+                                  fontWeight: 600
+                                }}
+                              >
+                                EXCLUIR
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+                <div style={{ background: 'white', padding: '24px', borderRadius: '24px', border: '1px solid var(--border)', width: '100%' }}>
+                  <h3 style={{ marginBottom: '16px', fontWeight: 600 }}>Liberar Novo Horário - Sala Carina Cigolini</h3>
+                  <form onSubmit={handleCreateRelease} style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <div style={{ flex: '1 1 200px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Sala Restrita</label>
+                      <select className="input-field" value={releaseForm.room_id} onChange={e => setReleaseForm({...releaseForm, room_id: e.target.value})} required>
+                        <option value="">Selecione a Sala</option>
+                        {rooms.filter(r => (r as any).locked_by_default).map(r => (
+                          <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ flex: '1 1 150px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Data</label>
+                      <input type="date" className="input-field" value={releaseForm.date} onChange={e => setReleaseForm({...releaseForm, date: e.target.value})} required />
+                    </div>
+                    <div style={{ flex: '1 1 100px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Início</label>
+                      <input type="time" className="input-field" value={releaseForm.start_time} onChange={e => setReleaseForm({...releaseForm, start_time: e.target.value})} required />
+                    </div>
+                    <div style={{ flex: '1 1 100px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Fim</label>
+                      <input type="time" className="input-field" value={releaseForm.end_time} onChange={e => setReleaseForm({...releaseForm, end_time: e.target.value})} required />
+                    </div>
+                    <button type="submit" className="primary-btn" style={{ padding: '14px 24px' }}>Liberar Acesso</button>
+                  </form>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Toggle View for Exclusive Slots */}
+                  <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', padding: '4px', borderRadius: '12px', alignSelf: isAdminMobile ? 'stretch' : 'flex-start' }}>
+                    <button
+                      onClick={() => setExclusiveViewMode('table')}
+                      style={{
+                        flex: isAdminMobile ? 1 : 'none',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: exclusiveViewMode === 'table' ? 'white' : 'transparent',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        boxShadow: exclusiveViewMode === 'table' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      📋 Lista
+                    </button>
+                    <button
+                      onClick={() => setExclusiveViewMode('calendar')}
+                      style={{
+                        flex: isAdminMobile ? 1 : 'none',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: exclusiveViewMode === 'calendar' ? 'white' : 'transparent',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        boxShadow: exclusiveViewMode === 'calendar' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      🗓️ Agenda
+                    </button>
+                  </div>
+
+                  {exclusiveViewMode === 'table' ? (
+                    <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
+                            <th style={{ padding: '20px' }}>SALA</th>
+                            <th style={{ padding: '20px' }}>DATA</th>
+                            <th style={{ padding: '20px' }}>HORÁRIO LIBERADO</th>
+                            <th style={{ padding: '20px' }}>AÇÕES</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {releasedSlots.map((s) => (
+                            <tr key={s.id} style={{ borderBottom: '1px solid var(--border)', fontSize: '14px', color: 'black' }}>
+                              <td style={{ padding: '20px', fontWeight: 600 }}>{rooms.find(r => r.id === s.room_id)?.name || 'Desconhecida'}</td>
+                              <td style={{ padding: '20px' }}>{new Date(s.date.split('T')[0] + 'T12:00:00-03:00').toLocaleDateString('pt-BR')}</td>
+                              <td style={{ padding: '20px', fontWeight: 600, color: 'var(--accent)' }}>{s.start_time.substring(0,5)} até {s.end_time.substring(0,5)}</td>
+                              <td style={{ padding: '20px' }}>
+                                <button onClick={() => handleDeleteRelease(s.id)} style={{ color: 'red', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Revogar</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    /* Calendar View for Releases */
+                    <div style={{ width: '100%', background: 'white', borderRadius: isAdminMobile ? '12px' : '24px', border: '1px solid var(--border)', padding: isAdminMobile ? '12px' : '24px', minHeight: '600px' }}>
+                       {/* Simplified Weekly View for Releases */}
+                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '8px' }}>
+                          <button 
+                            onClick={() => {
+                              const d = new Date(calendarDate);
+                              d.setDate(d.getDate() - 7);
+                              setCalendarDate(d);
+                            }}
+                            className="input-field" style={{ width: 'auto', padding: '8px 12px' }}
+                          >←</button>
+                          <h4 style={{ margin: 0, fontWeight: 700 }}>{calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase()}</h4>
+                          <button 
+                            onClick={() => {
+                              const d = new Date(calendarDate);
+                              d.setDate(d.getDate() + 7);
+                              setCalendarDate(d);
+                            }}
+                            className="input-field" style={{ width: 'auto', padding: '8px 12px' }}
+                          >→</button>
+                       </div>
+                       
+                       {/* Grid View for the week */}
+                       <div style={{ display: 'grid', gridTemplateColumns: isAdminMobile ? 'repeat(2, 1fr)' : 'repeat(7, 1fr)', gap: '10px' }}>
+                          {(() => {
+                            const curr = new Date(calendarDate);
+                            const day = curr.getDay();
+                            const diff = curr.getDate() - day + (day === 0 ? -6 : 1);
+                            const monday = new Date(curr.setDate(diff));
+                            
+                            return Array.from({length: 7}).map((_, i) => {
+                              const dayDate = new Date(monday);
+                              dayDate.setDate(monday.getDate() + i);
+                              const dayStr = dayDate.toISOString().split('T')[0];
+                              const dayReleases = releasedSlots.filter(s => s.date.startsWith(dayStr));
+                              
+                              return (
+                                <div key={i} style={{ minHeight: '120px', border: '1px solid #eee', borderRadius: '12px', padding: '12px', background: dayDate.toDateString() === new Date().toDateString() ? 'rgba(0,113,227,0.02)' : 'transparent', borderTop: dayDate.toDateString() === new Date().toDateString() ? '3px solid #0071e3' : '1px solid #eee' }}>
+                                  <div style={{ fontSize: '11px', textAlign: 'center', color: dayDate.toDateString() === new Date().toDateString() ? '#0071e3' : 'rgba(0,0,0,0.3)', fontWeight: 800, marginBottom: '8px', textTransform: 'uppercase' }}>
+                                    {dayDate.toLocaleDateString('pt-BR', { weekday: 'short' })} {dayDate.getDate()}
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {dayReleases.map(r => (
+                                      <div key={r.id} style={{ fontSize: '10px', background: '#0071e3', color: 'white', padding: '6px', borderRadius: '6px', fontWeight: 600, textAlign: 'center' }}>
+                                        {r.start_time.substring(0,5)} - {r.end_time.substring(0,5)}
+                                      </div>
+                                    ))}
+                                    {dayReleases.length === 0 && (
+                                      <div style={{ fontSize: '10px', color: '#ccc', textAlign: 'center', fontStyle: 'italic', marginTop: '10px' }}>Vazio</div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                       </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ) : activeTab === 'users' ? (
           <div style={{ width: '100%' }}>
@@ -1028,117 +1741,6 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : activeTab === 'exclusive_rooms' ? (
-          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '32px' }}>
-            <div style={{ background: 'white', padding: '24px', borderRadius: '24px', border: '1px solid var(--border)', width: '100%' }}>
-              <h3 style={{ marginBottom: '16px', fontWeight: 600 }}>Liberar Novo Horário</h3>
-              <form onSubmit={handleCreateRelease} style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div style={{ flex: '1 1 200px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Sala Restrita</label>
-                  <select className="input-field" value={releaseForm.room_id} onChange={e => setReleaseForm({...releaseForm, room_id: e.target.value})} required>
-                    <option value="">Selecione a Sala</option>
-                    {rooms.filter(r => (r as any).locked_by_default).map(r => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div style={{ flex: '1 1 150px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Data</label>
-                  <input type="date" className="input-field" value={releaseForm.date} onChange={e => setReleaseForm({...releaseForm, date: e.target.value})} required />
-                </div>
-                <div style={{ flex: '1 1 100px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Início</label>
-                  <input type="time" className="input-field" value={releaseForm.start_time} onChange={e => setReleaseForm({...releaseForm, start_time: e.target.value})} required />
-                </div>
-                <div style={{ flex: '1 1 100px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Fim</label>
-                  <input type="time" className="input-field" value={releaseForm.end_time} onChange={e => setReleaseForm({...releaseForm, end_time: e.target.value})} required />
-                </div>
-                <button type="submit" className="primary-btn" style={{ padding: '14px 24px' }}>Liberar Acesso</button>
-              </form>
-
-              {releaseForm.room_id && releaseForm.date && (
-                <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid var(--border)' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '12px', display: 'block' }}>Visualização de Disponibilidade para esta Data</label>
-                  {isFetchingReleaseAvailability ? (
-                    <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(0,0,0,0.3)', fontSize: '14px' }}>Carregando agenda...</div>
-                  ) : (
-                    <>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(70px, 1fr))', gap: '6px' }}>
-                        {[
-                          '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
-                          '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
-                          '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30',
-                          '19:00','19:30','20:00','20:30','21:00','21:30','22:00'
-                        ].map(h => {
-                          const isAvailable = releaseAvailableSlots.some(s => s.start === h);
-                          return (
-                            <div
-                              key={h}
-                              style={{
-                                padding: '6px 4px',
-                                borderRadius: '8px',
-                                border: `1px solid ${isAvailable ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.2)'}`,
-                                background: isAvailable ? 'rgba(22,163,74,0.06)' : 'rgba(239,68,68,0.04)',
-                                color: isAvailable ? '#16a34a' : '#dc2626',
-                                fontSize: '10px',
-                                fontWeight: 600,
-                                textAlign: 'center',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '2px'
-                              }}
-                            >
-                              <span>{h}</span>
-                              <span style={{ fontSize: '8px', opacity: 0.8 }}>{isAvailable ? 'Livre' : 'Ocupado'}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div style={{ display: 'flex', gap: '12px', marginTop: '12px', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
-                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} /> Disponível (Livre)
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>
-                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Indisponível (Ocupado / Já Liberado)
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div style={{ border: '1px solid var(--border)', borderRadius: '20px', overflowX: 'auto', background: 'white', width: '100%' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
-                    <th style={{ padding: '20px' }}>SALA</th>
-                    <th style={{ padding: '20px' }}>DATA</th>
-                    <th style={{ padding: '20px' }}>HORÁRIO LIBERADO</th>
-                    <th style={{ padding: '20px' }}>AÇÕES</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {releasedSlots.map((s) => (
-                    <tr key={s.id} style={{ borderBottom: '1px solid var(--border)', fontSize: '14px', color: 'black' }}>
-                      <td style={{ padding: '20px', fontWeight: 600 }}>{rooms.find(r => r.id === s.room_id)?.name || 'Desconhecida'}</td>
-                      <td style={{ padding: '20px' }}>{new Date(s.date.split('T')[0] + 'T12:00:00-03:00').toLocaleDateString('pt-BR')}</td>
-                      <td style={{ padding: '20px', fontWeight: 600, color: 'var(--accent)' }}>{s.start_time.substring(0,5)} até {s.end_time.substring(0,5)}</td>
-                      <td style={{ padding: '20px' }}>
-                        <button onClick={() => handleDeleteRelease(s.id)} style={{ color: 'red', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Revogar</button>
-                      </td>
-                    </tr>
-                  ))}
-                  {releasedSlots.length === 0 && (
-                    <tr>
-                      <td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: 'rgba(0,0,0,0.4)' }}>Nenhum horário liberado nesta sala.</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
@@ -1255,7 +1857,7 @@ export default function AdminDashboard() {
                     <input type="number" min="0" className="input-field" value={balanceForm.hourlyTickets} onChange={e => setBalanceForm({...balanceForm, hourlyTickets: parseInt(e.target.value) || 0})} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Tickets (Turnos 4H)</label>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Tickets (Turnos 5H)</label>
                     <input type="number" min="0" className="input-field" value={balanceForm.shiftTickets} onChange={e => setBalanceForm({...balanceForm, shiftTickets: parseInt(e.target.value) || 0})} />
                   </div>
                 </div>
@@ -1272,38 +1874,65 @@ export default function AdminDashboard() {
                 <h3 style={{ fontSize: '18px', fontWeight: 600 }}>Tabela de Saldos (Por Usuário)</h3>
               </div>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 'max-content' }}>
                   <thead>
                     <tr style={{ background: '#fafafa', borderBottom: '1px solid var(--border)' }}>
-                      <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>Usuário</th>
-                      <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>E-mail</th>
-                      <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>Consultório</th>
-                      <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', textAlign: 'center' }}>Horas</th>
-                      <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', textAlign: 'center' }}>Turnos (5h)</th>
+                      <th rowSpan={2} style={{ padding: '16px 24px', fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', borderRight: '1px solid #eee' }}>Usuário</th>
+                      {rooms.map(room => (
+                        <th key={room.id} colSpan={2} style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: 'black', textTransform: 'uppercase', textAlign: 'center', borderRight: '1px solid #eee', background: 'rgba(0,0,0,0.02)' }}>
+                          {room.name}
+                        </th>
+                      ))}
+                      <th colSpan={2} style={{ padding: '12px 16px', fontSize: '11px', fontWeight: 700, color: 'black', textTransform: 'uppercase', textAlign: 'center', background: 'rgba(0,0,0,0.05)' }}>
+                        TOTAIS GERAIS
+                      </th>
+                    </tr>
+                    <tr style={{ background: '#f5f5f5', borderBottom: '1px solid var(--border)' }}>
+                      {rooms.map(room => (
+                        <React.Fragment key={`${room.id}-sub`}>
+                          <th style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, color: 'rgba(0,0,0,0.3)', textAlign: 'center' }}>HORAS</th>
+                          <th style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, color: 'rgba(0,0,0,0.3)', textAlign: 'center', borderRight: '1px solid #eee' }}>TURNOS</th>
+                        </React.Fragment>
+                      ))}
+                      <th style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, color: '#34c759', textAlign: 'center' }}>H. TOTAL</th>
+                      <th style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, color: '#007aff', textAlign: 'center' }}>T. TOTAL</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {usersBalances.map((ub, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '16px 24px', fontWeight: 500 }}>{ub.user_name}</td>
-                        <td style={{ padding: '16px 24px', color: 'rgba(0,0,0,0.6)' }}>{ub.user_email}</td>
-                        <td style={{ padding: '16px 24px', color: 'rgba(0,0,0,0.6)' }}>{ub.room_name}</td>
-                        <td style={{ padding: '16px 24px', textAlign: 'center' }}>
-                           <span style={{ background: ub.hourly_tickets > 0 ? 'rgba(52, 199, 89, 0.1)' : 'transparent', color: ub.hourly_tickets > 0 ? '#34c759' : 'rgba(0,0,0,0.4)', padding: '4px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                              {ub.hourly_tickets}
-                           </span>
+                    {pivotedBalances.map((u) => (
+                      <tr key={u.email} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.2s' }}>
+                        <td style={{ padding: '16px 24px', borderRight: '1px solid #eee' }}>
+                          <div style={{ fontWeight: 600, fontSize: '14px' }}>{u.name}</div>
+                          <div style={{ fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>{u.email}</div>
                         </td>
-                        <td style={{ padding: '16px 24px', textAlign: 'center' }}>
-                           <span style={{ background: ub.shift_tickets > 0 ? 'rgba(52, 199, 89, 0.1)' : 'transparent', color: ub.shift_tickets > 0 ? '#34c759' : 'rgba(0,0,0,0.4)', padding: '4px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                              {ub.shift_tickets}
-                           </span>
+                        {rooms.map(room => (
+                          <React.Fragment key={`${u.email}-${room.id || room.name}`}>
+                            <td style={{ padding: '12px', textAlign: 'center', fontWeight: 600, fontSize: isAdminMobile ? '10px' : '13px', color: (u.rooms[room.name]?.hourly > 0) ? '#34c759' : '#ccc' }}>
+                              {isAdminMobile 
+                                ? (u.rooms[room.name]?.hourly > 0 ? 'Saldo disponível' : 'Sem saldo')
+                                : (u.rooms[room.name]?.hourly || 0)
+                              }
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center', fontWeight: 600, fontSize: isAdminMobile ? '10px' : '13px', color: (u.rooms[room.name]?.shift > 0) ? '#007aff' : '#ccc', borderRight: '1px solid #eee' }}>
+                              {isAdminMobile
+                                ? (u.rooms[room.name]?.shift > 0 ? 'Saldo disponível' : 'Sem saldo')
+                                : (u.rooms[room.name]?.shift || 0)
+                              }
+                            </td>
+                          </React.Fragment>
+                        ))}
+                        <td style={{ padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: isAdminMobile ? '10px' : '14px', background: 'rgba(52, 199, 89, 0.05)', color: '#1a8a3d' }}>
+                          {isAdminMobile ? (u.totalHourly > 0 ? 'Saldo disponível' : 'Sem saldo') : u.totalHourly}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: isAdminMobile ? '10px' : '14px', background: 'rgba(0, 122, 255, 0.05)', color: '#005bb7' }}>
+                          {isAdminMobile ? (u.totalShift > 0 ? 'Saldo disponível' : 'Sem saldo') : u.totalShift}
                         </td>
                       </tr>
                     ))}
-                    {usersBalances.length === 0 && (
+                    {pivotedBalances.length === 0 && (
                       <tr>
-                        <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: 'rgba(0,0,0,0.4)' }}>
-                          Nenhum usuário possui saldo de tickets no momento.
+                        <td colSpan={3 + rooms.length * 2} style={{ padding: '60px', textAlign: 'center', color: 'rgba(0,0,0,0.3)', fontWeight: 500 }}>
+                          Nenhum saldo encontrado.
                         </td>
                       </tr>
                     )}
@@ -1624,6 +2253,59 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                 </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Day Details Modal */}
+        <AnimatePresence>
+          {selectedDayReservations && (
+            <div className="modal-overlay" style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', zIndex: 1000 }} onClick={() => setSelectedDayReservations(null)}>
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="modal-content" 
+                style={{ width: '90%', maxWidth: '400px', padding: '32px', borderRadius: '32px' }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                  <div>
+                    <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Agendamentos</h2>
+                    <p style={{ color: 'rgba(0,0,0,0.4)', fontWeight: 600 }}>{selectedDayLabel}</p>
+                  </div>
+                  <button onClick={() => setSelectedDayReservations(null)} style={{ background: 'var(--secondary)', border: 'none', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>×</button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '450px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {selectedDayReservations.map(res => {
+                    const rangeMatch = res.booking_period.replace(/[\"\[\)]/g, '').split(',');
+                    const startStr = rangeMatch[0];
+                    const endStr = rangeMatch[1];
+                    const start = getSafeDate(startStr);
+                    const end = getSafeDate(endStr);
+                    
+                    return (
+                      <div key={res.id} style={{ padding: '16px', background: 'var(--secondary)', borderRadius: '16px', borderLeft: `4px solid ${res.status === 'confirmed' ? '#34c759' : '#ff9500'}` }}>
+                        <div style={{ fontWeight: 700, fontSize: '15px' }}>{res.user_name}</div>
+                        <div style={{ fontSize: '13px', color: 'rgba(0,0,0,0.5)', marginBottom: '8px' }}>{res.room_name}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 600, background: 'rgba(0,0,0,0.05)', padding: '4px 8px', borderRadius: '6px' }}>
+                            {start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - {end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          <div style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', color: res.status === 'confirmed' ? '#248a3d' : '#e67e00' }}>
+                            {res.status === 'confirmed' ? 'Confirmado' : 'Pendente'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                <button onClick={() => setSelectedDayReservations(null)} className="primary-btn" style={{ width: '100%', marginTop: '24px', padding: '16px' }}>
+                  Fechar
+                </button>
               </motion.div>
             </div>
           )}

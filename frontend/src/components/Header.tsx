@@ -8,7 +8,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [isMobile, setIsMobile] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -40,8 +48,29 @@ export function Header() {
   if (!user) return null;
 
   // Calculando saldos
+
   const formatTickets = () => {
     const hasTickets = user.tickets && user.tickets.length > 0 && user.tickets.some((t: any) => t.shift_tickets > 0 || t.hourly_tickets > 0);
+
+    if (isMobile) {
+      return (
+        <span style={{
+          background: hasTickets ? 'rgba(34, 197, 94, 0.1)' : 'rgba(0,0,0,0.05)',
+          color: hasTickets ? '#16a34a' : 'rgba(0,0,0,0.6)',
+          padding: '6px 14px',
+          borderRadius: '20px',
+          fontSize: '11px',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          whiteSpace: 'nowrap'
+        }}>
+          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: hasTickets ? '#22c55e' : 'rgba(0,0,0,0.2)' }} />
+          {hasTickets ? 'Saldo disponível' : 'Sem saldo'}
+        </span>
+      );
+    }
 
     if (!hasTickets) {
       return (
@@ -60,7 +89,7 @@ export function Header() {
               transition: 'background 0.2s',
             }}>
               <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'rgba(0,0,0,0.2)' }} />
-              Sem pacotes
+              Sem saldo
             </span>
           </Link>
         </div>
