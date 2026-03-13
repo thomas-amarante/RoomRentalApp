@@ -321,7 +321,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="rooms-grid">
-            {rooms.map((room, index) => (
+            {Array.isArray(rooms) && rooms.map((room, index) => (
               <motion.div key={room.id} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.1 }} className="room-card" onClick={() => setSelectedRoom(room)}>
                 <h3 className="room-card-title">{room.name}</h3>
                 <div className="price-tag">

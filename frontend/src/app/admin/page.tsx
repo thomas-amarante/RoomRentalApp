@@ -74,23 +74,25 @@ export default function AdminDashboard() {
   // Pivoted Balances for the table
   const pivotedBalances = useMemo(() => {
     const users: Record<string, any> = {};
-    usersBalances.forEach(ub => {
-      if (!users[ub.user_email]) {
-        users[ub.user_email] = {
-          name: ub.user_name,
-          email: ub.user_email,
-          rooms: {},
-          totalHourly: 0,
-          totalShift: 0
+    if (Array.isArray(usersBalances)) {
+      usersBalances.forEach(ub => {
+        if (!users[ub.user_email]) {
+          users[ub.user_email] = {
+            name: ub.user_name,
+            email: ub.user_email,
+            rooms: {},
+            totalHourly: 0,
+            totalShift: 0
+          };
+        }
+        users[ub.user_email].rooms[ub.room_name] = {
+          hourly: ub.hourly_tickets,
+          shift: ub.shift_tickets
         };
-      }
-      users[ub.user_email].rooms[ub.room_name] = {
-        hourly: ub.hourly_tickets,
-        shift: ub.shift_tickets
-      };
-      users[ub.user_email].totalHourly += ub.hourly_tickets;
-      users[ub.user_email].totalShift += ub.shift_tickets;
-    });
+        users[ub.user_email].totalHourly += ub.hourly_tickets;
+        users[ub.user_email].totalShift += ub.shift_tickets;
+      });
+    }
     return Object.values(users).sort((a,b) => a.name.localeCompare(b.name));
   }, [usersBalances]);
 

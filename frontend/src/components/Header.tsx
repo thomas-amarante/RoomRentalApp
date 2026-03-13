@@ -98,7 +98,7 @@ export function Header() {
 
     return (
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        {user.tickets.map((t: any) => {
+        {Array.isArray(user.tickets) && user.tickets.map((t: any) => {
           if (t.shift_tickets === 0 && t.hourly_tickets === 0) return null;
           return (
              <span key={t.room_id} style={{
