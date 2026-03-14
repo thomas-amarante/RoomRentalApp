@@ -35,6 +35,103 @@ const client = new MercadoPagoConfig({
   accessToken: process.env.MERCADO_PAGO_ACCESS_TOKEN || ''
 });
 
+// ─── WHATSAPP UTILITY ──────────────────────────────────────────────────────
+const sendWhatsApp = async (number: string, text: string) => {
+  try {
+    const cleanPhone = number.replace(/\D/g, '');
+    const fullNumber = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+    
+    const response = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': process.env.EVOLUTION_API_KEY || ''
+      },
+      body: JSON.stringify({
+        number: fullNumber,
+        text: text
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Erro Evolution API (${response.status}):`, errorText);
+    }
+    return response.ok;
+  } catch (error) {
+    console.error('❌ Erro ao enviar WhatsApp:', error);
+    return false;
+  }
+};
+
+const notifyReservationChange = async (reservationId: string, type: 'new' | 'cancelled' | 'rescheduled', oldPeriod?: string) => {
+  try {
+    const query = `
+      SELECT r.id, r.booking_period, r.status, r.total_price,
+             ro.name as room_name,
+             u.name as user_name, u.phone as user_phone
+      FROM reservations r
+      JOIN rooms ro ON r.room_id = ro.id
+      JOIN users u ON r.user_id = u.id
+      WHERE r.id = $1
+    `;
+    const result = await pool.query(query, [reservationId]);
+    if (result.rows.length === 0) return;
+
+    const res = result.rows[0];
+    const admins = await pool.query("SELECT phone FROM users WHERE is_admin = true AND phone IS NOT NULL AND phone != ''");
+    const adminPhones = Array.from(new Set(admins.rows.map(a => a.phone)));
+
+    // Formatação de data/hora amigável
+    const getFriendlyPeriod = (periodStr: string) => {
+      // periodStr no formato "[2026-03-14 10:00:00, 2026-03-14 11:00:00)"
+      const parts = periodStr.replace(/[\[\)\"]/g, '').split(',');
+      
+      // Adicionamos o offset para garantir que o JS interprete como horário de Brasília
+      const startStr = parts[0].trim().includes(' ') ? parts[0].trim().replace(' ', 'T') + '-03:00' : parts[0].trim();
+      const endStr = parts[1].trim().includes(' ') ? parts[1].trim().replace(' ', 'T') + '-03:00' : parts[1].trim();
+
+      const start = new Date(startStr);
+      const end = new Date(endStr);
+      
+      const date = start.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      const startTime = start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+      const endTime = end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+      
+      return { date, startTime, endTime, full: `${date} às ${startTime} - ${endTime}` };
+    };
+
+    const period = getFriendlyPeriod(res.booking_period);
+    let userMsg = '';
+    let clinicMsg = '';
+
+    if (type === 'new') {
+      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* para o dia ${period.date} das ${period.startTime} às ${period.endTime} foi confirmada com sucesso! 🎉`;
+      clinicMsg = `📌 *Nova Reserva Confirmada!*\n\n👤 Usuário: ${res.user_name}\n🏢 Sala: ${res.room_name}\n📅 Data: ${period.date}\n⏰ Horário: ${period.startTime} - ${period.endTime}`;
+    } else if (type === 'cancelled') {
+      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* para o dia ${period.date} das ${period.startTime} às ${period.endTime} foi *cancelada*. ❌`;
+      clinicMsg = `❌ *Reserva Cancelada!*\n\n👤 Usuário: ${res.user_name}\n🏢 Sala: ${res.room_name}\n📅 Data: ${period.date}\n⏰ Horário: ${period.startTime} - ${period.endTime}`;
+    } else if (type === 'rescheduled') {
+      const old = oldPeriod ? getFriendlyPeriod(oldPeriod) : null;
+      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* foi *reagendada* com sucesso! ✅\n\n📅 Nova Data: ${period.date}\n⏰ Novo Horário: ${period.startTime} - ${period.endTime}`;
+      clinicMsg = `🕒 *Reserva Reagendada!*\n\n👤 Usuário: ${res.user_name}\n🏢 Sala: ${res.room_name}\n\n⬅️ *Antigo:* ${old ? old.full : 'N/A'}\n➡️ *Novo:* ${period.full}`;
+    }
+
+    // Enviar para o usuário
+    if (res.user_phone) {
+      await sendWhatsApp(res.user_phone, userMsg);
+    }
+
+    // Enviar para os admins
+    for (const phone of adminPhones) {
+      await sendWhatsApp(phone, clinicMsg);
+    }
+
+  } catch (error) {
+    console.error('❌ Erro ao notificar mudança de reserva:', error);
+  }
+};
+
 // ROTA 1: Listar todas as salas (GET /api/rooms) - PÚBLICA
 app.get('/api/rooms', async (req: Request, res: Response) => {
   try {
@@ -364,6 +461,11 @@ app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: R
 
     const result = await pool.query(query, values);
 
+    if (finalStatus === 'confirmed') {
+      // Notificar imediatamente se foi confirmado via tickets
+      notifyReservationChange(result.rows[0].id, 'new');
+    }
+
     res.status(201).json({
       message: finalStatus === 'confirmed' ? 'Reserva confirmada via Saldo de Ingressos!' : 'Reserva criada! Aguardando pagamento.',
       reservation: result.rows[0],
@@ -417,6 +519,9 @@ app.put('/api/reservations/:id', authenticateToken, async (req: AuthRequest, res
       `UPDATE reservations SET booking_period = tsrange($1::timestamp, $2::timestamp) WHERE id = $3 RETURNING *`,
       [safeStart, safeEnd, id]
     );
+
+    // Notificar Reagendamento
+    notifyReservationChange(id as string, 'rescheduled', reservation.booking_period);
 
     res.json({ message: 'Reserva reagendada com sucesso!', reservation: updated.rows[0] });
   } catch (err: any) {
@@ -532,6 +637,10 @@ app.patch('/api/admin/reservations/:id/cancel', authenticateToken, requireAdmin,
   const { id } = req.params;
   try {
     await pool.query('UPDATE reservations SET status = $1 WHERE id = $2', ['cancelled', id]);
+    
+    // Notificar Cancelamento por Admin
+    notifyReservationChange(id as string, 'cancelled');
+
     res.json({ message: 'Reserva cancelada com sucesso.' });
   } catch (err) {
     console.error(err);
@@ -583,6 +692,9 @@ app.post('/api/admin/reservations/manual', authenticateToken, requireAdmin, asyn
         RETURNING *
      `, [room_id, user_id, start_time, end_time]);
      
+     // Notificar Reserva Manual
+     notifyReservationChange(result.rows[0].id, 'new');
+
      res.status(201).json(result.rows[0]);
   } catch (err: any) {
      console.error(err);
@@ -637,7 +749,7 @@ app.put('/api/admin/users/:id', authenticateToken, requireAdmin, async (req: Aut
   try {
     const result = await pool.query(
       'UPDATE users SET name = $1, email = $2, is_admin = $3, phone = $4 WHERE id = $5 RETURNING id, name, email, is_admin, phone',
-      [name, email, is_admin, phone, id]
+      [name, email, is_admin, phone, id as string]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -787,10 +899,26 @@ app.put('/api/admin/reservations/:id', authenticateToken, requireAdmin, async (r
   const { id } = req.params;
   const { room_id, user_id, booking_period, status, total_price } = req.body;
   try {
+    const existing = await pool.query('SELECT status, booking_period FROM reservations WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Reserva não encontrada.' });
+    
+    const oldStatus = existing.rows[0].status;
+    const oldPeriod = existing.rows[0].booking_period;
+
     const result = await pool.query(
       'UPDATE reservations SET room_id = $1, user_id = $2, booking_period = $3, status = $4, total_price = $5 WHERE id = $6 RETURNING *',
-      [room_id, user_id, booking_period, status, total_price, id]
+      [room_id as string, user_id as string, booking_period as string, status as string, total_price as string, id as string]
     );
+
+    // Detecção de mudanças para notificação
+    if (status === 'cancelled' && oldStatus !== 'cancelled') {
+        notifyReservationChange(id as string, 'cancelled');
+    } else if (status === 'confirmed' && oldStatus !== 'confirmed') {
+        notifyReservationChange(id as string, 'new');
+    } else if (booking_period !== oldPeriod && status === 'confirmed') {
+        notifyReservationChange(id as string, 'rescheduled', oldPeriod);
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -1202,6 +1330,9 @@ app.post('/api/payments/webhook', async (req: Request, res: Response) => {
           );
 
           console.log(`✅ Webhook MP: Pagamento Direto Aprovado para Locação ${reservation_id}`);
+
+          // Notificar Nova Reserva após confirmação de pagamento
+          notifyReservationChange(reservation_id, 'new');
         }
       }
     } catch (error) {
@@ -1257,6 +1388,9 @@ setInterval(async () => {
         SET status = 'cancelled', cancellation_notice_sent = TRUE 
         WHERE id = $1
       `, [res.id]);
+
+      // Notificar ambos via sistema central (Usuário e Clínica)
+      notifyReservationChange(res.id as string, 'cancelled');
     }
 
     if (expiredReservations.rowCount && expiredReservations.rowCount > 0) {

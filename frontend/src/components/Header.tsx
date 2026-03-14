@@ -134,7 +134,7 @@ export function Header() {
 
         {/* Desktop Menu */}
         <div className="desktop-nav">
-          <Link href="/">Salas</Link>
+          <Link href="/">Alugar</Link>
           <Link href="/reservations">Reservas</Link>
           <Link href="/account" className="action-btn">Comprar Saldos</Link>
           {user.is_admin && <Link href="/admin" style={{ color: 'var(--accent)' }}>Admin</Link>}
@@ -162,7 +162,7 @@ export function Header() {
           >
             <button className="close-menu-button" onClick={() => setIsMenuOpen(false)}>✕</button>
             <nav className="mobile-nav">
-              <Link href="/" onClick={() => setIsMenuOpen(false)}>Salas</Link>
+              <Link href="/" onClick={() => setIsMenuOpen(false)}>Alugar</Link>
               <Link href="/reservations" onClick={() => setIsMenuOpen(false)}>Reservas</Link>
               <Link href="/account" onClick={() => setIsMenuOpen(false)} style={{ color: '#34d399', fontWeight: 'bold' }}>Comprar Saldos</Link>
               {user.is_admin && <Link href="/admin" onClick={() => setIsMenuOpen(false)} style={{ color: '#60a5fa' }}>Admin</Link>}
