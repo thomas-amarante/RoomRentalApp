@@ -24,6 +24,9 @@ interface Room {
   hourly_rate: number;
   shift_rate: number;
   capacity: number;
+  photo1?: string;
+  photo2?: string;
+  photo3?: string;
 }
 
 interface UserStats {
@@ -65,6 +68,7 @@ export default function AdminDashboard() {
   const [exclusiveViewMode, setExclusiveViewMode] = useState<'table' | 'calendar'>('table');
   const [selectedDayReservations, setSelectedDayReservations] = useState<AdminReservation[] | null>(null);
   const [selectedDayLabel, setSelectedDayLabel] = useState<string>('');
+  const [selectedReservation, setSelectedReservation] = useState<AdminReservation | null>(null);
 
   // Balance Management States
   const [balanceForm, setBalanceForm] = useState({ userId: '', roomId: '', hourlyTickets: 0, shiftTickets: 0 });
@@ -130,7 +134,10 @@ export default function AdminDashboard() {
     description: '',
     hourly_rate: 0,
     shift_rate: 0,
-    capacity: 1
+    capacity: 1,
+    photo1: '',
+    photo2: '',
+    photo3: ''
   });
 
   // Package Management States
@@ -336,10 +343,15 @@ export default function AdminDashboard() {
   const handleOpenRoomModal = (room?: Room) => {
     if (room) {
       setEditingRoom(room);
-      setRoomForm(room);
+      setRoomForm({
+        ...room,
+        photo1: room.photo1 || '',
+        photo2: room.photo2 || '',
+        photo3: room.photo3 || ''
+      });
     } else {
       setEditingRoom(null);
-      setRoomForm({ name: '', description: '', hourly_rate: 0, shift_rate: 0, capacity: 1 });
+      setRoomForm({ name: '', description: '', hourly_rate: 0, shift_rate: 0, capacity: 1, photo1: '', photo2: '', photo3: '' });
     }
     setIsRoomModalOpen(true);
   };
@@ -361,14 +373,40 @@ export default function AdminDashboard() {
         body: JSON.stringify(roomForm)
       });
 
+    } finally {
+      setIsRoomModalOpen(false);
+      fetchData();
+    }
+  };
+
+  const [isUploading, setIsUploading] = useState<number | null>(null);
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'photo1' | 'photo2' | 'photo3') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(field === 'photo1' ? 1 : field === 'photo2' ? 2 : 3);
+    const formData = new FormData();
+    formData.append('photo', file);
+
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${user.token || ''}`
+        },
+        body: formData
+      });
+
       if (res.ok) {
-        setIsRoomModalOpen(false);
-        fetchData();
+        const { url } = await res.json();
+        setRoomForm(prev => ({ ...prev, [field]: url }));
       } else {
-        alert('Erro ao salvar sala');
+        alert('Erro ao carregar imagem');
       }
-    } catch (err) {
-      alert('Erro ao conectar ao servidor');
+    } catch {
+      alert('Erro de conexão no upload');
+    } finally {
+      setIsUploading(null);
     }
   };
 
@@ -710,7 +748,7 @@ export default function AdminDashboard() {
           </div>
           <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', margin: '0 auto', color: 'black' }}>
             {activeTab === 'reservations' ? 'Sala de controle' : 
-             activeTab === 'rooms' ? (roomsSubTab === 'list' ? 'Gerenciar Salas' : 'Liberações Manuais - Carina Cigolini') : 
+             activeTab === 'rooms' ? (roomsSubTab === 'list' ? 'Gerenciar Salas' : 'Liberações Manuais - Consultório 3') : 
              activeTab === 'add_balance' ? 'Gerenciar Créditos' :
              activeTab === 'packages' ? 'Gestão de Pacotes' :
              activeTab === 'users' ? 'Estatísticas de Usuários' :
@@ -1139,34 +1177,73 @@ export default function AdminDashboard() {
                           const weekEnd = new Date(weekStart);
                           weekEnd.setDate(weekEnd.getDate() + 7);
 
-                          return reservations
-                            .filter(res => {
-                              if (res.status === 'cancelled') return false;
-                              if (selectedRoom && res.room_name !== selectedRoom) return false;
-                              if (selectedProfessional && res.user_name !== selectedProfessional) return false;
-                              
-                              const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
-                              const startStr = cleanStr.split(',')[0];
-                              const resDate = getSafeDate(startStr);
-                              return resDate >= weekStart && resDate < weekEnd;
-                            })
-                            .map(res => {
-                              const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
-                              const [startStr, endStr] = cleanStr.split(',');
-                              const start = getSafeDate(startStr);
-                              const end = getSafeDate(endStr);
-                              
-                              const dayIndex = (start.getDay() + 6) % 7; // Monday = 0
-                              const startHour = start.getHours() + start.getMinutes() / 60;
-                              const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-                              
-                              const top = (startHour - 7) * 60; 
-                              const height = duration * 60;
-                              const left = isAdminMobile 
-                                 ? `calc(50px + 100px * ${dayIndex})`
-                                 : `calc(80px + (100% - 80px) / 7 * ${dayIndex})`;
-                               const width = isAdminMobile ? '100px' : `calc((100% - 80px) / 7)`;
+                          // Pre-compute sub-column positioning for overlapping reservations
+                          const weekFiltered = reservations.filter(res => {
+                            if (res.status === 'cancelled') return false;
+                            if (selectedRoom && res.room_name !== selectedRoom) return false;
+                            if (selectedProfessional && res.user_name !== selectedProfessional) return false;
+                            const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
+                            const startStr = cleanStr.split(',')[0];
+                            const resDate = getSafeDate(startStr);
+                            return resDate >= weekStart && resDate < weekEnd;
+                          });
 
+                          // For each reservation, determine how many others overlap (same day+time)
+                          const overlapMap = new Map();
+                          weekFiltered.forEach(res => {
+                            const c = res.booking_period.replace(/[\"\[\)]/g, '');
+                            const [s, e] = c.split(',');
+                            const rStart = getSafeDate(s);
+                            const rEnd   = getSafeDate(e);
+                            const rDay   = (rStart.getDay() + 6) % 7;
+                            // Find all reservations that overlap this one on the same day
+                            const overlapping = weekFiltered.filter(other => {
+                              const oc = other.booking_period.replace(/[\"\[\)]/g, '');
+                              const [os, oe] = oc.split(',');
+                              const oStart = getSafeDate(os);
+                              const oEnd   = getSafeDate(oe);
+                              const oDay   = (oStart.getDay() + 6) % 7;
+                              return oDay === rDay && oStart < rEnd && oEnd > rStart;
+                            });
+                            // Sort by room name so ordering is deterministic
+                            overlapping.sort((a, b) => a.room_name.localeCompare(b.room_name));
+                            const subCol = overlapping.findIndex(o => o.id === res.id);
+                            overlapMap.set(res.id, { subCol, totalCols: overlapping.length });
+                          });
+
+                          return weekFiltered
+                             .map(res => {
+                               const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
+                               const [startStr, endStr] = cleanStr.split(',');
+                               const start = getSafeDate(startStr);
+                               const end = getSafeDate(endStr);
+
+                               const dayIndex = (start.getDay() + 6) % 7; // Monday = 0
+                               const startHour = start.getHours() + start.getMinutes() / 60;
+                               const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+
+                               const top = (startHour - 7) * 60;
+                               const height = duration * 60;
+
+                               // Overlap-aware positioning
+                               const { subCol, totalCols } = overlapMap.get(res.id) || { subCol: 0, totalCols: 1 };
+                               const left = isAdminMobile
+                                 ? `calc(50px + 100px * ${dayIndex} + ${(100 / totalCols) * subCol}px)`
+                                 : `calc(80px + (100% - 80px) / 7 * ${dayIndex} + (100% - 80px) / 7 / ${totalCols} * ${subCol})`;
+                               const width = isAdminMobile
+                                 ? `${100 / totalCols}px`
+                                 : `calc((100% - 80px) / 7 / ${totalCols})`;
+                               // Cor por sala (view semanal)
+                               const getWeekColor = (name: string) => {
+                                 const n = (name || '').toLowerCase();
+                                 if (n.includes('carina'))  return { bg: 'rgba(52,199,89,0.12)',  border: '#34c759' };
+                                 if (n.includes('1'))        return { bg: 'rgba(0,122,255,0.10)',  border: '#007aff' };
+                                 if (n.includes('2'))        return { bg: 'rgba(255,45,135,0.10)', border: '#ff2d87' };
+                                 return { bg: 'rgba(52,199,89,0.12)', border: '#34c759' };
+                               };
+                               const weekColor = res.status !== 'confirmed'
+                                 ? { bg: 'rgba(255,149,0,0.10)', border: '#ff9500' }
+                                 : getWeekColor(res.room_name);
                                return (
                                  <div
                                    key={res.id}
@@ -1181,11 +1258,11 @@ export default function AdminDashboard() {
                                    }}
                                  >
                                   <div 
-                                    onClick={() => alert(`Reserva: ${res.user_name}\nSala: ${res.room_name}\nStatus: ${res.status.toUpperCase()}\nValor: R$ ${Number(res.total_price).toFixed(2)}`)}
+                                    onClick={() => setSelectedReservation(res)}
                                     style={{
-                                      background: res.status === 'confirmed' ? 'rgba(52,199,89,0.1)' : 'rgba(255,149,0,0.1)',
-                                      border: `1px solid ${res.status === 'confirmed' ? '#34c759' : '#ff9500'}`,
-                                      borderLeft: `4px solid ${res.status === 'confirmed' ? '#34c759' : '#ff9500'}`,
+                                      background: weekColor.bg,
+                                      border: `1px solid ${weekColor.border}`,
+                                      borderLeft: `4px solid ${weekColor.border}`,
                                       borderRadius: '6px',
                                       height: '100%',
                                       padding: '6px 8px',
@@ -1303,40 +1380,54 @@ export default function AdminDashboard() {
                               }}>
                                 {d.day}
                               </div>
-                              
                               {isAdminMobile ? (
-                                dayReservations.length > 0 && (
-                                  <div style={{ 
-                                    width: '6px', 
-                                    height: '6px', 
-                                    borderRadius: '50%', 
-                                    background: '#34c759',
-                                    marginTop: '2px'
-                                  }} />
-                                )
+                                dayReservations.length > 0 && (() => {
+                                  const distinctRooms = Array.from(new Set(dayReservations.map(r => r.room_name)));
+                                  return (
+                                    <div style={{ display: 'flex', gap: '3px', marginTop: '2px' }}>
+                                      {distinctRooms.slice(0, 3).map(name => {
+                                        const n = name?.toLowerCase() || '';
+                                        const dotColor = n.includes('carina') ? '#34c759' : n.includes('1') ? '#007aff' : n.includes('2') ? '#ff2d87' : '#34c759';
+                                        return <div key={name} style={{ width: '6px', height: '6px', borderRadius: '50%', background: dotColor }} />;
+                                      })}
+                                    </div>
+                                  );
+                                })()
                               ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '100%' }}>
-                                  {dayReservations.slice(0, 4).map(res => (
-                                    <div 
-                                      key={res.id}
-                                      onClick={() => alert(`Reserva: ${res.user_name}\nSala: ${res.room_name}\nStatus: ${res.status.toUpperCase()}`)}
-                                      style={{
-                                        fontSize: '9px',
-                                        fontWeight: 600,
-                                        padding: '2px 6px',
-                                        borderRadius: '4px',
-                                        background: res.status === 'confirmed' ? 'rgba(52,199,89,0.1)' : 'rgba(255,149,0,0.1)',
-                                        color: res.status === 'confirmed' ? '#248a3d' : '#e67e00',
-                                        borderLeft: `2px solid ${res.status === 'confirmed' ? '#34c759' : '#ff9500'}`,
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      {res.user_name.split(' ')[0]}
-                                    </div>
-                                  ))}
+                                  {dayReservations.slice(0, 4).map(res => {
+                                    const getRoomColor = (name: string) => {
+                                      const n = name?.toLowerCase() || '';
+                                      if (n.includes('carina')) return { bg: 'rgba(52,199,89,0.12)',  text: '#248a3d', border: '#34c759' };
+                                      if (n.includes('1'))       return { bg: 'rgba(0,122,255,0.10)',  text: '#0051a8', border: '#007aff' };
+                                      if (n.includes('2'))       return { bg: 'rgba(255,45,135,0.10)', text: '#b5005e', border: '#ff2d87' };
+                                      return { bg: 'rgba(52,199,89,0.12)', text: '#248a3d', border: '#34c759' };
+                                    };
+                                    const color = res.status !== 'confirmed'
+                                      ? { bg: 'rgba(255,149,0,0.10)', text: '#e67e00', border: '#ff9500' }
+                                      : getRoomColor(res.room_name);
+                                    return (
+                                      <div
+                                        key={res.id}
+                                        onClick={(e) => { e.stopPropagation(); setSelectedReservation(res); }}
+                                        style={{
+                                          fontSize: '9px',
+                                          fontWeight: 600,
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          background: color.bg,
+                                          color: color.text,
+                                          borderLeft: `2px solid ${color.border}`,
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        {res.user_name.split(' ')[0]}
+                                      </div>
+                                    );
+                                  })}
                                   {dayReservations.length > 4 && (
                                     <div style={{ fontSize: '8px', color: 'rgba(0,0,0,0.4)', textAlign: 'center', fontWeight: 600 }}>
                                       +{dayReservations.length - 4} mais
@@ -1353,9 +1444,15 @@ export default function AdminDashboard() {
                 )}
                 
                 {/* Legend */}
-                <div style={{ marginTop: '24px', display: 'flex', gap: '20px', fontSize: '12px', color: 'rgba(0,0,0,0.5)', fontWeight: 600 }}>
+                <div style={{ marginTop: '24px', display: 'flex', gap: '20px', fontSize: '12px', color: 'rgba(0,0,0,0.5)', fontWeight: 600, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(52,199,89,0.2)', border: '1px solid #34c759' }} /> Confirmado
+                    <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(52,199,89,0.2)', border: '1px solid #34c759' }} /> Consultório 3
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(0,122,255,0.15)', border: '1px solid #007aff' }} /> Consultório 1
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(255,45,135,0.15)', border: '1px solid #ff2d87' }} /> Consultório 2
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'rgba(255,149,0,0.2)', border: '1px solid #ff9500' }} /> Pendente
@@ -1473,7 +1570,7 @@ export default function AdminDashboard() {
             ) : (
               <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '32px' }}>
                 <div style={{ background: 'white', padding: '24px', borderRadius: '24px', border: '1px solid var(--border)', width: '100%' }}>
-                  <h3 style={{ marginBottom: '16px', fontWeight: 600 }}>Liberar Novo Horário - Sala Carina Cigolini</h3>
+                  <h3 style={{ marginBottom: '16px', fontWeight: 600 }}>Liberar Novo Horário - Sala Consultório 3</h3>
                   <form onSubmit={handleCreateRelease} style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                     <div style={{ flex: '1 1 200px' }}>
                       <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Sala Restrita</label>
@@ -1486,7 +1583,7 @@ export default function AdminDashboard() {
                     </div>
                     <div style={{ flex: '1 1 150px' }}>
                       <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Data</label>
-                      <input type="date" className="input-field" value={releaseForm.date} onChange={e => setReleaseForm({...releaseForm, date: e.target.value})} required />
+                      <input type="date" className="input-field" value={releaseForm.date} onChange={e => { if (e.target.value) setReleaseForm({...releaseForm, date: e.target.value}); }} required />
                     </div>
                     <div style={{ flex: '1 1 100px' }}>
                       <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Início</label>
@@ -1910,24 +2007,18 @@ export default function AdminDashboard() {
                         {rooms.map(room => (
                           <React.Fragment key={`${u.email}-${room.id || room.name}`}>
                             <td style={{ padding: '12px', textAlign: 'center', fontWeight: 600, fontSize: isAdminMobile ? '10px' : '13px', color: (u.rooms[room.name]?.hourly > 0) ? '#34c759' : '#ccc' }}>
-                              {isAdminMobile 
-                                ? (u.rooms[room.name]?.hourly > 0 ? 'Saldo disponível' : 'Sem saldo')
-                                : (u.rooms[room.name]?.hourly || 0)
-                              }
+                              {u.rooms[room.name]?.hourly || 0}
                             </td>
                             <td style={{ padding: '12px', textAlign: 'center', fontWeight: 600, fontSize: isAdminMobile ? '10px' : '13px', color: (u.rooms[room.name]?.shift > 0) ? '#007aff' : '#ccc', borderRight: '1px solid #eee' }}>
-                              {isAdminMobile
-                                ? (u.rooms[room.name]?.shift > 0 ? 'Saldo disponível' : 'Sem saldo')
-                                : (u.rooms[room.name]?.shift || 0)
-                              }
+                              {u.rooms[room.name]?.shift || 0}
                             </td>
                           </React.Fragment>
                         ))}
                         <td style={{ padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: isAdminMobile ? '10px' : '14px', background: 'rgba(52, 199, 89, 0.05)', color: '#1a8a3d' }}>
-                          {isAdminMobile ? (u.totalHourly > 0 ? 'Saldo disponível' : 'Sem saldo') : u.totalHourly}
+                          {u.totalHourly}
                         </td>
                         <td style={{ padding: '12px', textAlign: 'center', fontWeight: 800, fontSize: isAdminMobile ? '10px' : '14px', background: 'rgba(0, 122, 255, 0.05)', color: '#005bb7' }}>
-                          {isAdminMobile ? (u.totalShift > 0 ? 'Saldo disponível' : 'Sem saldo') : u.totalShift}
+                          {u.totalShift}
                         </td>
                       </tr>
                     ))}
@@ -2045,7 +2136,7 @@ export default function AdminDashboard() {
                       className="input-field"
                       value={roomForm.name}
                       onChange={e => setRoomForm({ ...roomForm, name: e.target.value })}
-                      placeholder="Ex: Sala Carina Cigolini"
+                      placeholder="Ex: Consultório 3"
                     />
                   </div>
                   <div>
@@ -2086,6 +2177,40 @@ export default function AdminDashboard() {
                       value={roomForm.capacity}
                       onChange={e => setRoomForm({ ...roomForm, capacity: parseInt(e.target.value) })}
                     />
+                  </div>
+
+                  {/* FOTOS */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.03)', padding: '16px', borderRadius: '16px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px' }}>Fotos do Consultório</div>
+                    
+                    {['photo1', 'photo2', 'photo3'].map((field, i) => (
+                      <div key={field} style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 600 }}>Foto {i + 1}</span>
+                          <label style={{ 
+                            fontSize: '11px', fontWeight: 700, color: '#007aff', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '4px' 
+                          }}>
+                            <span style={{ fontSize: '14px' }}>📁</span> 
+                            {isUploading === (i + 1) ? 'Carregando...' : 'Carregar Local'}
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              style={{ display: 'none' }} 
+                              onChange={(e) => handlePhotoUpload(e, field as any)} 
+                              disabled={isUploading !== null}
+                            />
+                          </label>
+                        </div>
+                        <input
+                          className="input-field"
+                          value={(roomForm as any)[field]}
+                          onChange={e => setRoomForm({ ...roomForm, [field]: e.target.value })}
+                          placeholder="Link da foto ou carregue um arquivo"
+                          style={{ fontSize: '12px', padding: '8px 12px' }}
+                        />
+                      </div>
+                    ))}
                   </div>
 
                   <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
@@ -2137,7 +2262,7 @@ export default function AdminDashboard() {
                   <div style={{ display: 'flex', gap: '16px' }}>
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Data</label>
-                      <input type="date" className="input-field" value={manualBookingForm.date} onChange={e => setManualBookingForm({...manualBookingForm, date: e.target.value})} required min={new Date().toISOString().split('T')[0]} />
+                      <input type="date" className="input-field" value={manualBookingForm.date} onChange={e => { if (e.target.value) setManualBookingForm({...manualBookingForm, date: e.target.value}); }} required min={new Date().toISOString().split('T')[0]} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Tipo</label>
@@ -2311,6 +2436,116 @@ export default function AdminDashboard() {
               </motion.div>
             </div>
           )}
+        </AnimatePresence>
+
+        {/* Reservation Detail Modal */}
+        <AnimatePresence>
+          {selectedReservation && (() => {
+            const res = selectedReservation;
+            const rangeMatch = res.booking_period.replace(/[\"\[\)]/g, '').split(',');
+            const start = getSafeDate(rangeMatch[0]);
+            const end = getSafeDate(rangeMatch[1]);
+            const isConfirmed = res.status === 'confirmed';
+            const isPending = res.status === 'pending';
+            const statusLabel = isConfirmed ? 'Confirmado' : isPending ? 'Aguardando pagamento' : 'Cancelado';
+            const statusColor = isConfirmed ? '#34c759' : isPending ? '#ff9500' : '#ff3b30';
+            const statusBg = isConfirmed ? 'rgba(52,199,89,0.10)' : isPending ? 'rgba(255,149,0,0.10)' : 'rgba(255,59,48,0.10)';
+            return (
+              <div
+                onClick={() => setSelectedReservation(null)}
+                style={{
+                  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                  backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', zIndex: 1000, padding: '20px'
+                }}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    background: 'white', borderRadius: '28px', padding: '32px',
+                    width: '100%', maxWidth: '440px',
+                    boxShadow: '0 32px 80px rgba(0,0,0,0.18)'
+                  }}
+                >
+                  {/* Header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '28px' }}>
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: 'rgba(0,0,0,0.35)', textTransform: 'uppercase', marginBottom: '6px' }}>Detalhes da Reserva</div>
+                      <div style={{ fontSize: '22px', fontWeight: 800, color: 'black', lineHeight: 1.2 }}>{res.user_name}</div>
+                      <div style={{ fontSize: '13px', color: 'rgba(0,0,0,0.45)', marginTop: '4px' }}>{res.user_email}</div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedReservation(null)}
+                      style={{
+                        width: '36px', height: '36px', borderRadius: '50%',
+                        border: 'none', background: 'rgba(0,0,0,0.06)',
+                        cursor: 'pointer', fontSize: '16px', fontWeight: 700,
+                        color: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', flexShrink: 0
+                      }}
+                    >✕</button>
+                  </div>
+
+                  {/* Info Cards */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <div style={{ flex: 1, background: 'var(--secondary)', borderRadius: '16px', padding: '16px' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(0,0,0,0.35)', textTransform: 'uppercase', marginBottom: '6px' }}>Sala</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'black' }}>{res.room_name}</div>
+                      </div>
+                      <div style={{ flex: 1, background: 'var(--secondary)', borderRadius: '16px', padding: '16px' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(0,0,0,0.35)', textTransform: 'uppercase', marginBottom: '6px' }}>Valor</div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'black' }}>R$ {Number(res.total_price).toFixed(2)}</div>
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--secondary)', borderRadius: '16px', padding: '16px' }}>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(0,0,0,0.35)', textTransform: 'uppercase', marginBottom: '6px' }}>Período</div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'black' }}>
+                        {start.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'rgba(0,0,0,0.5)', marginTop: '4px' }}>
+                        {start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} → {end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                    <div style={{ background: statusBg, borderRadius: '16px', padding: '16px', border: `1px solid ${statusColor}22` }}>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(0,0,0,0.35)', textTransform: 'uppercase', marginBottom: '6px' }}>Status</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: statusColor }} />
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: statusColor }}>{statusLabel}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    {isConfirmed && (
+                      <button
+                        onClick={() => { handleCancel(res.id); setSelectedReservation(null); }}
+                        style={{
+                          flex: 1, padding: '14px', borderRadius: '14px',
+                          border: '1px solid #ff3b30', background: 'transparent',
+                          color: '#ff3b30', fontWeight: 700, fontSize: '14px', cursor: 'pointer'
+                        }}
+                      >
+                        Cancelar Reserva
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setSelectedReservation(null)}
+                      className="primary-btn"
+                      style={{ flex: 1, padding: '14px', borderRadius: '14px', fontSize: '14px' }}
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            );
+          })()}
         </AnimatePresence>
 
       </main>

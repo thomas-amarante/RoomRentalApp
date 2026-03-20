@@ -661,7 +661,7 @@ export default function Reservations() {
                   {/* Data */}
                   <div style={{ marginBottom: '20px' }}>
                     <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>Nova Data</label>
-                    <input type="date" value={rescheduleDate} onChange={e => setRescheduleDate(e.target.value)} min={new Date().toISOString().split('T')[0]} style={{ width: '100%', padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.12)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+                    <input type="date" value={rescheduleDate} onChange={e => { if (e.target.value) setRescheduleDate(e.target.value); }} min={new Date().toISOString().split('T')[0]} style={{ width: '100%', padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.12)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
                   </div>
 
                   {/* Horário */}

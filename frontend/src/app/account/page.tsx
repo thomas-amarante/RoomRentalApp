@@ -140,17 +140,10 @@ export default function AccountPage() {
               {tickets.filter(t => t.hourly_tickets > 0 || t.shift_tickets > 0).map((t: any) => (
                 <div key={t.room_id} style={{ background: 'white', border: '1px solid rgba(0,0,0,0.08)', borderRadius: '16px', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <div style={{ fontSize: '13px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', marginBottom: '4px' }}>{t.room_name}</div>
-                  {isMobile ? (
-                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
-                      Saldo disponível
-                    </div>
-                  ) : (
-                    <>
-                      {t.hourly_tickets > 0 && <div style={{ fontSize: '15px', fontWeight: 600 }}>🕐 {t.hourly_tickets} hora{t.hourly_tickets !== 1 ? 's' : ''} avulsa{t.hourly_tickets !== 1 ? 's' : ''}</div>}
-                      {t.shift_tickets > 0 && <div style={{ fontSize: '15px', fontWeight: 600 }}>📅 {t.shift_tickets} turno{t.shift_tickets !== 1 ? 's' : ''}</div>}
-                    </>
-                  )}
+                  <>
+                    {t.hourly_tickets > 0 && <div style={{ fontSize: '15px', fontWeight: 600 }}>🕐 {t.hourly_tickets} hora{t.hourly_tickets !== 1 ? 's' : ''} avulsa{t.hourly_tickets !== 1 ? 's' : ''}</div>}
+                    {t.shift_tickets > 0 && <div style={{ fontSize: '15px', fontWeight: 600 }}>📅 {t.shift_tickets} turno{t.shift_tickets !== 1 ? 's' : ''}</div>}
+                  </>
                 </div>
               ))}
             </div>

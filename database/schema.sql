@@ -19,9 +19,12 @@ CREATE TABLE rooms (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     hourly_rate DECIMAL(10, 2) NOT NULL, -- Valor por 1 hora
-    shift_rate DECIMAL(10, 2) NOT NULL,  -- Valor por 4 horas (turno)
+    shift_rate DECIMAL(10, 2) NOT NULL,  -- Valor por 5 horas (turno)
     capacity INTEGER NOT NULL,
     locked_by_default BOOLEAN DEFAULT FALSE,
+    photo1 TEXT,
+    photo2 TEXT,
+    photo3 TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

@@ -5,6 +5,9 @@ import { Pool } from 'pg';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { authenticateToken, requireAdmin, AuthRequest } from './middleware/auth';
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
 
@@ -19,6 +22,31 @@ app.use(express.json());
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
+
+// Configuração de Upload de Fotos
+const uploadDir = 'uploads';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage: storage });
+
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Se o node rodar via dist/, precisamos garantir que o static aponte para a pasta certa
+if (fs.existsSync(path.join(__dirname, '../../uploads'))) {
+  app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
+}
+app.use('/uploads', express.static('uploads'));
 
 // Testar conexão com o banco ao iniciar
 pool.connect((err, client, release) => {
@@ -163,7 +191,7 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
 
         UNION ALL
 
-        -- Business Rule: Carina Cigolini Fixed Schedule
+        -- Business Rule: Consultório 3 Fixed Schedule
         SELECT 
           r.id AS room_id,
           (d.d + (h.h || ':' || lpad(m.m::text, 2, '0') || ':00')::time)::timestamp AS start_time,
@@ -201,7 +229,7 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
       FROM rooms r
       LEFT JOIN first_available fa ON r.id = fa.room_id
       ORDER BY 
-        CASE WHEN r.name ILIKE '%Carina Cigolini%' THEN 0 ELSE 1 END,
+        CASE WHEN r.name ILIKE '%Consultório 3%' THEN 0 ELSE 1 END,
         r.name
     `;
     const result = await pool.query(query);
@@ -210,6 +238,15 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
     console.error(err);
     res.status(500).json({ error: 'Erro ao buscar salas.' });
   }
+});
+
+// ROTA: Upload de Fotos (Admin)
+app.post('/api/admin/upload', authenticateToken, requireAdmin, upload.single('photo'), (req: AuthRequest, res: Response) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+  }
+  const fileUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/uploads/${req.file.filename}`;
+  res.json({ url: fileUrl });
 });
 // ROTA 1.5: Obter horários disponíveis dinâmicos - PÚBLICA
 app.get('/api/availability', async (req: Request, res: Response) => {
@@ -362,7 +399,7 @@ app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: R
       
       let isAllowed = releaseCheck.rows.length > 0;
       
-      // 2. Check da agenda fixa da Carina Cigolini (regra de negócio hardcoded)
+      // 2. Check da agenda fixa do Consultório 3 (regra de negócio hardcoded)
       if (!isAllowed && room_id === '0b5d4bf5-b66b-43bf-9575-0ca9925251f4') {
         const dayOfWeekResult = await pool.query(
           'SELECT EXTRACT(ISODOW FROM $1::date) as dow',
@@ -844,11 +881,11 @@ app.delete('/api/admin/released_slots/:id', authenticateToken, requireAdmin, asy
 
 // SALAS (CRUD COMPLETO)
 app.post('/api/admin/rooms', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const { name, description, hourly_rate, shift_rate, capacity } = req.body;
+  const { name, description, hourly_rate, shift_rate, capacity, photo1, photo2, photo3 } = req.body;
   try {
     const result = await pool.query(
-      'INSERT INTO rooms (name, description, hourly_rate, shift_rate, capacity) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [name, description, hourly_rate, shift_rate, capacity]
+      'INSERT INTO rooms (name, description, hourly_rate, shift_rate, capacity, photo1, photo2, photo3) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+      [name, description, hourly_rate, shift_rate, capacity, photo1, photo2, photo3]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -859,11 +896,11 @@ app.post('/api/admin/rooms', authenticateToken, requireAdmin, async (req: AuthRe
 
 app.put('/api/admin/rooms/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { name, description, hourly_rate, shift_rate, capacity } = req.body;
+  const { name, description, hourly_rate, shift_rate, capacity, photo1, photo2, photo3 } = req.body;
   try {
     const result = await pool.query(
-      'UPDATE rooms SET name = $1, description = $2, hourly_rate = $3, shift_rate = $4, capacity = $5 WHERE id = $6 RETURNING *',
-      [name, description, hourly_rate, shift_rate, capacity, id]
+      'UPDATE rooms SET name = $1, description = $2, hourly_rate = $3, shift_rate = $4, capacity = $5, photo1 = $6, photo2 = $7, photo3 = $8 WHERE id = $9 RETURNING *',
+      [name, description, hourly_rate, shift_rate, capacity, photo1, photo2, photo3, id]
     );
     res.json(result.rows[0]);
   } catch (err) {

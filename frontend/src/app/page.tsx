@@ -14,6 +14,9 @@ interface Room {
   shift_rate: number;
   capacity: number;
   next_availability: string | null;
+  photo1?: string;
+  photo2?: string;
+  photo3?: string;
 }
 
 function formatNextAvailability(dateString: string | null) {
@@ -54,15 +57,28 @@ function formatNextAvailability(dateString: string | null) {
 
 export default function Home() {
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [packages, setPackages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [bookingType, setBookingType] = useState<'hourly' | 'shift'>('hourly');
   const [isBooking, setIsBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [paidWithTickets, setPaidWithTickets] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [fullscreenData, setFullscreenData] = useState<{ photos: string[], index: number } | null>(null);
   const router = useRouter();
+
+  // Retorna o preço da hora avulsa (sem promoção) de um pacote com qty=1 do tipo hourly.
+  // Se não houver pacote cadastrado para a sala, usa o hourly_rate da sala como fallback.
+  const getHourlyRate = (room: Room): number => {
+    const singleHourPkg = packages.find(
+      (p) => p.room_id === room.id && p.type === 'hourly' && Number(p.qty) === 1
+    );
+    if (singleHourPkg) return Number(singleHourPkg.price);
+    return room.hourly_rate;
+  };
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -215,11 +231,16 @@ export default function Home() {
         })
         .catch(console.error);
 
-      // Fetch rooms
-      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/rooms`)
-        .then(res => res.json())
-        .then(data => setRooms(data))
-        .catch(() => setLoading(false))
+      // Fetch rooms e packages em paralelo
+      Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/rooms`).then(res => res.json()),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/packages`).then(res => res.json()),
+      ])
+        .then(([roomsData, packsData]) => {
+          setRooms(Array.isArray(roomsData) ? roomsData : []);
+          setPackages(Array.isArray(packsData) ? packsData : []);
+        })
+        .catch(() => {})
         .finally(() => setLoading(false));
     }
   }, [router]);
@@ -286,13 +307,11 @@ export default function Home() {
 
       if (response.ok) {
         const data = await response.json();
-        if (data.paidWithTickets) {
-          alert('Horário Marcado! Como você possui pacotes, não foi gerado cobrança. 1 ingresso foi deduzido da sua conta.');
-        }
+        setPaidWithTickets(!!data.paidWithTickets);
         setBookingSuccess(true);
         setTimeout(() => {
           router.push('/reservations');
-        }, 2000);
+        }, 10000);
       } else {
         const data = await response.json();
         alert(data.error || 'Erro ao agendar');
@@ -322,22 +341,14 @@ export default function Home() {
         ) : (
           <div className="rooms-grid">
             {Array.isArray(rooms) && rooms.map((room, index) => (
-              <motion.div key={room.id} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.1 }} className="room-card" onClick={() => setSelectedRoom(room)}>
-                <h3 className="room-card-title">{room.name}</h3>
-                <div className="price-tag">
-                  A partir de <strong>R${room.hourly_rate}</strong>/hora
-                </div>
-                <p className="room-card-description">{room.description}</p>
-                <div className="room-card-footer">
-                  <div className="room-card-availability">
-                    <span className="room-card-availability-label">Próxima disponibilidade</span>
-                    <span className="room-card-availability-value">
-                      {formatNextAvailability(room.next_availability)}
-                    </span>
-                  </div>
-                  <button className="primary-btn">Agendar</button>
-                </div>
-              </motion.div>
+              <RoomCard 
+                key={room.id} 
+                room={room} 
+                index={index} 
+                onClick={() => setSelectedRoom(room)} 
+                getHourlyRate={getHourlyRate} 
+                onZoomImage={(allPhotos, currentIdx) => setFullscreenData({ photos: allPhotos, index: currentIdx })} 
+              />
             ))}
           </div>
         )}
@@ -388,7 +399,15 @@ export default function Home() {
                     <div style={{ textAlign: 'center', padding: '20px' }}>
                       <div style={{ fontSize: '64px', marginBottom: '20px', color: '#34c759' }}>✓</div>
                       <h2 style={{ fontSize: '28px', marginBottom: '8px' }}>Agendado com sucesso!</h2>
-                      <p style={{ color: 'rgba(0,0,0,0.4)' }}>Redirecionando para suas reservas...</p>
+                      {paidWithTickets ? (
+                        <p style={{ color: 'rgba(0,0,0,0.5)', fontSize: '14px', lineHeight: 1.6, maxWidth: '300px', margin: '0 auto 12px' }}>
+                          Como você possui pacotes, não foi gerada cobrança.{' '}
+                          {bookingType === 'shift'
+                            ? '1 turno de 5 horas foi deduzido do seu saldo digital.'
+                            : '1 hora avulsa foi deduzida do seu saldo digital.'}{' '}🎟️
+                        </p>
+                      ) : null}
+                      <p style={{ color: 'rgba(0,0,0,0.3)', fontSize: '13px' }}>Redirecionando para suas reservas...</p>
                     </div>
                   ) : (
                     <>
@@ -426,7 +445,7 @@ export default function Home() {
 
                       <div className="input-group" style={{ marginBottom: '20px' }}>
                         <label style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Data</label>
-                        <input type="date" className="input-field" value={date} onChange={(e) => setDate(e.target.value)} min={today} />
+                        <input type="date" className="input-field" value={date} onChange={(e) => { if (e.target.value) setDate(e.target.value); }} min={today} />
                       </div>
 
                       {bookingType === 'hourly' ? (
@@ -543,12 +562,8 @@ export default function Home() {
                         </div>
                       )}
 
-                      <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'rgba(0,0,0,0.3)', textTransform: 'uppercase', fontWeight: 600 }}>Total</div>
-                          <div style={{ fontSize: '24px', fontWeight: 700 }}>R${bookingType === 'hourly' ? selectedRoom.hourly_rate : selectedRoom.shift_rate}</div>
-                        </div>
-                        <button className="primary-btn" style={{ padding: '14px 40px', fontSize: '15px' }} onClick={handleBooking} disabled={isBooking}>
+                      <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'center' }}>
+                        <button className="primary-btn" style={{ padding: '14px 60px', fontSize: '15px' }} onClick={handleBooking} disabled={isBooking}>
                           {isBooking ? 'Agendando...' : 'Confirmar'}
                         </button>
                       </div>
@@ -560,7 +575,227 @@ export default function Home() {
             );
           })()}
         </AnimatePresence>
+
+        {/* Foto em tela cheia (Zoom) com Carrossel */}
+        <AnimatePresence>
+          {fullscreenData && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setFullscreenData(null)}
+              style={{
+                position: 'fixed', inset: 0, zIndex: 3000,
+                background: 'rgba(255,255,255,0.95)',
+                backdropFilter: 'blur(20px)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '24px', cursor: 'zoom-out'
+              }}
+            >
+              <div style={{ position: 'absolute', top: '24px', right: '24px', fontSize: '24px', color: 'black', fontWeight: 600, zIndex: 3010 }}>✕</div>
+              
+              {/* Setas no Zoom Modal */}
+              {fullscreenData.photos.length > 1 && (
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFullscreenData(prev => prev ? ({ ...prev, index: (prev.index - 1 + prev.photos.length) % prev.photos.length }) : null);
+                    }}
+                    style={{
+                      position: 'absolute', left: '40px', top: '50%', transform: 'translateY(-50%)',
+                      background: 'white', border: 'none', borderRadius: '50%',
+                      width: '60px', height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', zIndex: 3010, boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: '30px', fontWeight: 'bold'
+                    }}
+                    title="Anterior"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFullscreenData(prev => prev ? ({ ...prev, index: (prev.index + 1) % prev.photos.length }) : null);
+                    }}
+                    style={{
+                      position: 'absolute', right: '40px', top: '50%', transform: 'translateY(-50%)',
+                      background: 'white', border: 'none', borderRadius: '50%',
+                      width: '60px', height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', zIndex: 3010, boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: '30px', fontWeight: 'bold'
+                    }}
+                    title="Próxima"
+                  >
+                    ›
+                  </button>
+                </>
+              )}
+
+              <AnimatePresence mode="wait">
+                <motion.img
+                  key={fullscreenData.photos[fullscreenData.index]}
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.8, opacity: 0 }}
+                  transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                  src={fullscreenData.photos[fullscreenData.index]}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    borderRadius: '24px',
+                    boxShadow: '0 40px 80px rgba(0,0,0,0.1)',
+                    objectFit: 'contain'
+                  }}
+                  onClick={e => e.stopPropagation()}
+                />
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </>
   );
 }
+
+function RoomCard({ room, index, onClick, getHourlyRate, onZoomImage }: { room: Room, index: number, onClick: () => void, getHourlyRate: (r: Room) => number, onZoomImage: (photos: string[], index: number) => void }) {
+  const [currentImg, setCurrentImg] = useState(0);
+  const photoUrls = [room.photo1, room.photo2, room.photo3].filter(p => !!p) as string[];
+  const currentPhoto = photoUrls[currentImg];
+
+  useEffect(() => {
+    if (photoUrls.length <= 1) return;
+    
+    const interval = setInterval(() => {
+      setCurrentImg(prev => (prev + 1) % photoUrls.length);
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [photoUrls.length]);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 30 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      transition={{ delay: index * 0.1 }} 
+      className="room-card" 
+      onClick={onClick}
+      style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', cursor: 'pointer', border: 'none' }}
+    >
+      {/* Cabeçalho Limpo com Texto Azul Centralizado */}
+      <div style={{ padding: '24px', width: '100%', boxSizing: 'border-box', textAlign: 'center' }}>
+        <h3 style={{ margin: 0, fontSize: '24px', fontWeight: 800, color: '#007aff', letterSpacing: '-0.02em', background: 'none' }}>
+          {room.name}
+        </h3>
+        <div style={{ marginTop: '8px', fontSize: '14px', color: 'rgba(0,122,255,0.7)', borderBottom: 'none', paddingBottom: 0 }}>
+          A partir de <strong style={{ color: '#007aff', fontSize: '24px', fontWeight: 800 }}>R$ {getHourlyRate(room).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>/hora
+        </div>
+      </div>
+
+      {/* Imagem do Consultório */}
+      <div 
+        style={{ width: '100%', height: '220px', background: '#f5f5f5', position: 'relative', overflow: 'hidden' }}
+        onClick={(e) => {
+          if (currentPhoto) {
+            e.stopPropagation();
+            onZoomImage(photoUrls, currentImg);
+          }
+        }}
+      >
+        <AnimatePresence mode="wait">
+          {currentPhoto ? (
+            <motion.img 
+              key={currentPhoto}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.6 }}
+              src={currentPhoto} 
+              alt={room.name} 
+              style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', inset: 0 }} 
+            />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.2)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em' }}>
+              SEM FOTO
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Setas de Navegação (Apenas se houver mais de uma foto) */}
+        {photoUrls.length > 1 && (
+          <>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setCurrentImg(prev => (prev - 1 + photoUrls.length) % photoUrls.length);
+              }}
+              style={{
+                position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)',
+                background: 'rgba(255,255,255,0.7)', border: 'none', borderRadius: '50%',
+                width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', zIndex: 15, backdropFilter: 'blur(4px)', fontSize: '18px', fontWeight: 'bold'
+              }}
+              title="Anterior"
+            >
+              ‹
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setCurrentImg(prev => (prev + 1) % photoUrls.length);
+              }}
+              style={{
+                position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                background: 'rgba(255,255,255,0.7)', border: 'none', borderRadius: '50%',
+                width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', zIndex: 15, backdropFilter: 'blur(4px)', fontSize: '18px', fontWeight: 'bold'
+              }}
+              title="Próxima"
+            >
+              ›
+            </button>
+          </>
+        )}
+
+        {currentPhoto && (
+           <div style={{ position: 'absolute', bottom: '12px', right: '12px', background: 'rgba(255,255,255,0.8)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', backdropFilter: 'blur(4px)', zIndex: 10 }}>🔍</div>
+        )}
+      </div>
+
+      <div style={{ padding: '24px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <p className="room-card-description" style={{ marginTop: 0, marginBottom: '16px', flex: 1 }}>{room.description}</p>
+        
+        {/* Navegador de Fotos */}
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '24px', justifyContent: 'center' }} onClick={e => e.stopPropagation()}>
+          {photoUrls.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentImg(idx)}
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                border: 'none',
+                background: currentImg === idx ? 'black' : 'rgba(0,0,0,0.1)',
+                cursor: 'pointer',
+                padding: 0,
+                transition: 'all 0.4s',
+                transform: currentImg === idx ? 'scale(1.2)' : 'scale(1)'
+              }}
+              title={`Ver foto ${idx + 1}`}
+            />
+          ))}
+        </div>
+
+        <div className="room-card-footer" style={{ marginTop: 'auto' }}>
+          <div className="room-card-availability">
+            <span className="room-card-availability-label">Próxima disponibilidade</span>
+            <span className="room-card-availability-value">
+              {formatNextAvailability(room.next_availability)}
+            </span>
+          </div>
+          <button className="primary-btn">Agendar</button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+

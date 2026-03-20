@@ -60,11 +60,14 @@ services:
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE}
       FRONTEND_URL: ${NEXT_PUBLIC_APP_URL}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     # ports:
     #   - "3001:3001"
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./backend/uploads:/app/uploads
 
   # ─── 3. Frontend (Next.js) ─────────────────────────────────────────────────
   frontend:
