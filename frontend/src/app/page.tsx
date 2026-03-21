@@ -680,13 +680,17 @@ function RoomCard({ room, index, onClick, getHourlyRate, onZoomImage }: { room: 
       onClick={onClick}
       style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', cursor: 'pointer', border: 'none' }}
     >
-      {/* Cabeçalho Limpo com Texto Azul Centralizado */}
-      <div style={{ padding: '24px', width: '100%', boxSizing: 'border-box', textAlign: 'center' }}>
-        <h3 style={{ margin: 0, fontSize: '24px', fontWeight: 800, color: '#007aff', letterSpacing: '-0.02em', background: 'none' }}>
+      {/* Cabeçalho com Nome em Azul Forte */}
+      <div style={{ width: '100%', background: '#003d99', padding: '16px 24px', textAlign: 'center', boxSizing: 'border-box' }}>
+        <h3 style={{ margin: 0, fontSize: '24px', fontWeight: 800, color: 'white', letterSpacing: '-0.02em' }}>
           {room.name}
         </h3>
-        <div style={{ marginTop: '8px', fontSize: '14px', color: 'rgba(0,122,255,0.7)', borderBottom: 'none', paddingBottom: 0 }}>
-          A partir de <strong style={{ color: '#007aff', fontSize: '24px', fontWeight: 800 }}>R$ {getHourlyRate(room).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>/hora
+      </div>
+
+      {/* Seção de Preço em Fundo Branco (Texto Preto) */}
+      <div style={{ padding: '16px 24px', width: '100%', boxSizing: 'border-box', textAlign: 'center' }}>
+        <div style={{ fontSize: '14px', color: 'rgba(0,0,0,0.6)', borderBottom: 'none', paddingBottom: 0 }}>
+          A partir de <strong style={{ color: 'black', fontSize: '24px', fontWeight: 800 }}>R$ {getHourlyRate(room).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>/hora
         </div>
       </div>
 

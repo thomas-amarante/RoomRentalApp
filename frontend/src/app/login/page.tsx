@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -19,6 +19,13 @@ export default function Login() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const user = localStorage.getItem('roomrental_user');
+    if (user) {
+      router.replace('/');
+    }
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,9 +54,9 @@ export default function Login() {
         } else {
           localStorage.setItem('roomrental_user', JSON.stringify({ ...data.user, token: data.token }));
           if (mode === 'register' || !data.user.is_phone_verified) {
-            router.push('/verify');
+            router.replace('/verify');
           } else {
-            router.push('/');
+            router.replace('/');
           }
         }
       } else {
