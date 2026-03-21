@@ -1271,11 +1271,16 @@ app.post('/api/payments/packages', authenticateToken, async (req: AuthRequest, r
     const userName = userRes.rows[0]?.name || 'Usuário';
     const userCpf = userRes.rows[0]?.cpf ? userRes.rows[0].cpf.replace(/\D/g, '') : '00000000000';
     
+    // Define tempo de expiração do PIX (20 minutos)
+    const expirationDate = new Date();
+    expirationDate.setMinutes(expirationDate.getMinutes() + 20);
+
     const response = await payment.create({
       body: {
         transaction_amount: Number(unit_price),
         description: title,
         payment_method_id: 'pix',
+        date_of_expiration: expirationDate.toISOString(),
         payer: {
           email: userEmail,
           first_name: userName,
@@ -1296,10 +1301,18 @@ app.post('/api/payments/packages', authenticateToken, async (req: AuthRequest, r
 
     const pixData = response.point_of_interaction?.transaction_data;
     if (pixData) {
+      // REGISTRAR NO BANCO NA TABELA DE PAGAMENTOS
+      await pool.query(`
+        INSERT INTO payments 
+        (user_id, room_id, title, amount_paid, payment_status, item_type, gateway_transaction_id, qr_code, qr_code_64, pix_expires_at)
+        VALUES ($1, $2, $3, $4, 'pending', 'package', $5, $6, $7, $8)
+      `, [userId, room_id, title, unit_price, response.id, pixData.qr_code, pixData.qr_code_base64, expirationDate]);
+
       res.json({
         qr_code: pixData.qr_code,
         qr_code_base64: pixData.qr_code_base64,
-        payment_id: response.id
+        payment_id: response.id,
+        expires_at: expirationDate
       });
     } else {
       res.status(500).json({ error: 'Erro ao extrair dados do PIX' });
@@ -1307,6 +1320,31 @@ app.post('/api/payments/packages', authenticateToken, async (req: AuthRequest, r
   } catch (error) {
     console.error('Erro de Criação PIX Pacote:', error);
     res.status(500).json({ error: 'Erro ao gerar pagamento PIX do pacote' });
+  }
+});
+
+// ROTA 5.1.6: Histórico de Pagamentos de Pacotes (MEU HISTÓRICO)
+app.get('/api/payments/history', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.id;
+  try {
+    const query = `
+      SELECT 
+        p.*, 
+        r.name as room_name,
+        CASE 
+          WHEN p.payment_status = 'pending' AND p.pix_expires_at < NOW() THEN 'expired'
+          ELSE p.payment_status 
+        END as current_status
+      FROM payments p
+      LEFT JOIN rooms r ON p.room_id = r.id
+      WHERE p.user_id = $1
+      ORDER BY p.created_at DESC
+    `;
+    const result = await pool.query(query, [userId]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar histórico de pagamentos:', error);
+    res.status(500).json({ error: 'Erro interno ao buscar histórico' });
   }
 });
 
@@ -1337,6 +1375,7 @@ app.post('/api/payments/webhook', async (req: Request, res: Response) => {
           const shiftTickets = Number(metadata.shift_tickets) || 0;
           const hourlyTickets = Number(metadata.hourly_tickets) || 0;
           
+          // 1. Dar os tickets ao usuário
           await pool.query(`
             INSERT INTO user_tickets (user_id, room_id, hourly_tickets, shift_tickets)
             VALUES ($1, $2, $3, $4)
@@ -1344,7 +1383,14 @@ app.post('/api/payments/webhook', async (req: Request, res: Response) => {
             SET hourly_tickets = user_tickets.hourly_tickets + EXCLUDED.hourly_tickets,
                 shift_tickets = user_tickets.shift_tickets + EXCLUDED.shift_tickets
           `, [userId, roomId, hourlyTickets, shiftTickets]);
-          
+
+          // 2. Atualizar tabela de pagamentos
+          await pool.query(`
+            UPDATE payments 
+            SET payment_status = 'approved', updated_at = NOW() 
+            WHERE gateway_transaction_id = $1::text
+          `, [paymentId]);
+
           console.log(`✅ Webhook MP: Pacote Integrado! Usuário ID: ${userId} recebeu +${shiftTickets} Turnos e +${hourlyTickets} Horas no Consultório ID: ${roomId}`);
         
         } else if (metadata?.reservation_id) {

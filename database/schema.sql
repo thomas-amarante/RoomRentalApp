@@ -59,14 +59,25 @@ CREATE TABLE reservations (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Tabela de Pagamentos (Referenciando o Gateway externo como Stripe)
+-- Tabela de Pagamentos (Unificada para Reservas e Pacotes de Saldo)
 CREATE TABLE payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     reservation_id UUID REFERENCES reservations(id) ON DELETE CASCADE,
-    gateway_transaction_id VARCHAR(255) UNIQUE, -- ID que vem do Stripe/Adyen
-    payment_status VARCHAR(50), -- succeeded, processing, failed
+    room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
+    
+    title VARCHAR(255),
     amount_paid DECIMAL(10, 2),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    payment_status VARCHAR(50) DEFAULT 'pending', -- pending, approved, cancelled, expired
+    item_type VARCHAR(20) DEFAULT 'reservation', -- 'reservation' ou 'package'
+    
+    gateway_transaction_id VARCHAR(255) UNIQUE, -- ID do Mercado Pago
+    qr_code TEXT, -- Payload do PIX (Copia e Cola)
+    qr_code_64 TEXT, -- Base64 do QR Code para imagem
+    
+    pix_expires_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Tabela de Inventário de Pacotes (Tickets Associados a Salas Múltiplas)
