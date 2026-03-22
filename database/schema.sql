@@ -38,6 +38,17 @@ CREATE TABLE released_slots (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Tabela de Inativações (Bloqueios pelo Admin)
+CREATE TABLE room_blocks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    reason VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Tabela de Reservas (Core Business)
 CREATE TABLE reservations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -76,6 +87,8 @@ CREATE TABLE payments (
     qr_code_64 TEXT, -- Base64 do QR Code para imagem
     
     pix_expires_at TIMESTAMP WITH TIME ZONE,
+    payment_reminder_sent BOOLEAN DEFAULT FALSE,
+    cancellation_notice_sent BOOLEAN DEFAULT FALSE,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

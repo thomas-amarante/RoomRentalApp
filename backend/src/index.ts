@@ -58,7 +58,6 @@ pool.connect((err, client, release) => {
   }
 });
 
-// Configuração Mercado Pago
 const client = new MercadoPagoConfig({
   accessToken: process.env.MERCADO_PAGO_ACCESS_TOKEN || ''
 });
@@ -95,8 +94,7 @@ const sendWhatsApp = async (number: string, text: string) => {
 const notifyReservationChange = async (reservationId: string, type: 'new' | 'cancelled' | 'rescheduled', oldPeriod?: string) => {
   try {
     const query = `
-      SELECT r.id, r.booking_period, r.status, r.total_price,
-             ro.name as room_name,
+      SELECT r.booking_period, ro.name as room_name, ro.shift_rate, ro.hourly_rate,
              u.name as user_name, u.phone as user_phone
       FROM reservations r
       JOIN rooms ro ON r.room_id = ro.id
@@ -110,23 +108,24 @@ const notifyReservationChange = async (reservationId: string, type: 'new' | 'can
     const admins = await pool.query("SELECT phone FROM users WHERE is_admin = true AND phone IS NOT NULL AND phone != ''");
     const adminPhones = Array.from(new Set(admins.rows.map(a => a.phone)));
 
-    // Formatação de data/hora amigável
     const getFriendlyPeriod = (periodStr: string) => {
-      // periodStr no formato "[2026-03-14 10:00:00, 2026-03-14 11:00:00)"
       const parts = periodStr.replace(/[\[\)\"]/g, '').split(',');
-      
-      // Adicionamos o offset para garantir que o JS interprete como horário de Brasília
       const startStr = parts[0].trim().includes(' ') ? parts[0].trim().replace(' ', 'T') + '-03:00' : parts[0].trim();
       const endStr = parts[1].trim().includes(' ') ? parts[1].trim().replace(' ', 'T') + '-03:00' : parts[1].trim();
 
       const start = new Date(startStr);
       const end = new Date(endStr);
       
+      const diffMs = end.getTime() - start.getTime();
+      const diffHours = diffMs / (1000 * 60 * 60);
+      const isShift = diffHours === 5;
+      const hoursText = isShift ? 'Turno (5 horas)' : `${diffHours} Hora(s) Avulsa(s)`;
+
       const date = start.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
       const startTime = start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
       const endTime = end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
       
-      return { date, startTime, endTime, full: `${date} às ${startTime} - ${endTime}` };
+      return { date, startTime, endTime, full: `${date} às ${startTime} - ${endTime}`, hoursText };
     };
 
     const period = getFriendlyPeriod(res.booking_period);
@@ -134,29 +133,48 @@ const notifyReservationChange = async (reservationId: string, type: 'new' | 'can
     let clinicMsg = '';
 
     if (type === 'new') {
-      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* para o dia ${period.date} das ${period.startTime} às ${period.endTime} foi confirmada com sucesso! 🎉`;
-      clinicMsg = `📌 *Nova Reserva Confirmada!*\n\n👤 Usuário: ${res.user_name}\n🏢 Sala: ${res.room_name}\n📅 Data: ${period.date}\n⏰ Horário: ${period.startTime} - ${period.endTime}`;
+      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* foi confirmada com sucesso! 🎉\n\n📅 Data: ${period.date}\n⏰ Horário: ${period.startTime} às ${period.endTime}\n⏱️ Formato: ${period.hoursText}\n\n⚠️ *MUITO IMPORTANTE:* Você tem até 24 HORAS ANTES do horário agendado para realizar qualquer reagendamento pelo sistema. Fique atento!`;
+      clinicMsg = `📌 *Nova Reserva Confirmada!*\n\n👤 Usuário: ${res.user_name}\n📱 Contato: ${res.user_phone || 'N/A'}\n🏢 Sala: ${res.room_name}\n📅 Data: ${period.date}\n⏰ Horário: ${period.startTime} - ${period.endTime}\n⏱️ Formato: ${period.hoursText}`;
     } else if (type === 'cancelled') {
-      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* para o dia ${period.date} das ${period.startTime} às ${period.endTime} foi *cancelada*. ❌`;
-      clinicMsg = `❌ *Reserva Cancelada!*\n\n👤 Usuário: ${res.user_name}\n🏢 Sala: ${res.room_name}\n📅 Data: ${period.date}\n⏰ Horário: ${period.startTime} - ${period.endTime}`;
+      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* (Marcada para ${period.date} das ${period.startTime} às ${period.endTime}) foi cancelada no sistema pelo nosso administrador. ❌ Qualquer dúvida, entre em contato com a clínica.`;
+      clinicMsg = `❌ *Reserva Cancelada pelo Admin!*\n\n👤 Usuário: ${res.user_name}\n🏢 Sala: ${res.room_name}\n📅 Data: ${period.date}\n⏰ Horário: ${period.startTime} - ${period.endTime}`;
     } else if (type === 'rescheduled') {
       const old = oldPeriod ? getFriendlyPeriod(oldPeriod) : null;
-      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* foi *reagendada* com sucesso! ✅\n\n📅 Nova Data: ${period.date}\n⏰ Novo Horário: ${period.startTime} - ${period.endTime}`;
-      clinicMsg = `🕒 *Reserva Reagendada!*\n\n👤 Usuário: ${res.user_name}\n🏢 Sala: ${res.room_name}\n\n⬅️ *Antigo:* ${old ? old.full : 'N/A'}\n➡️ *Novo:* ${period.full}`;
+      userMsg = `Olá *${res.user_name}*! Sua reserva na *${res.room_name}* foi *reagendada* com sucesso! ✅\n\n📅 Nova Data: ${period.date}\n⏰ Novo Horário: ${period.startTime} às ${period.endTime} (${period.hoursText})\n\n⚠️ Lembrete: Você tem até 24 horas antes do horário para futuros reagendamentos.`;
+      clinicMsg = `🕒 *Reserva Reagendada!*\n\n👤 Usuário: ${res.user_name}\n📱 Contato: ${res.user_phone || 'N/A'}\n🏢 Sala: ${res.room_name}\n\n⬅️ *Antigo:* ${old ? old.full : 'N/A'}\n➡️ *Novo:* ${period.full} (${period.hoursText})`;
     }
 
-    // Enviar para o usuário
     if (res.user_phone) {
       await sendWhatsApp(res.user_phone, userMsg);
     }
-
-    // Enviar para os admins
     for (const phone of adminPhones) {
       await sendWhatsApp(phone, clinicMsg);
     }
 
   } catch (error) {
     console.error('❌ Erro ao notificar mudança de reserva:', error);
+  }
+};
+
+const notifyBalancePurchase = async (userId: string, title: string, amount: string, shiftTickets: number, hourlyTickets: number) => {
+  try {
+    const user = await pool.query("SELECT name, phone FROM users WHERE id = $1", [userId]);
+    if (user.rows.length === 0) return;
+    const u = user.rows[0];
+    
+    const userMsg = `✅ Olá *${u.name}*, recebemos o seu pagamento via PIX! O pacote *${title}* foi creditado na sua conta com sucesso. Você já pode reservar suas salas escolhendo este saldo no aplicativo!`;
+    const adminMsg = `💰 *Nova Compra de Pacote (PIX)*\n\n👤 Usuário: ${u.name}\n📱 Contato: ${u.phone || 'N/A'}\n📦 Produto: ${title} (${shiftTickets} Turnos / ${hourlyTickets} Horas)\n💵 Valor Pago: R$ ${Number(amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n📅 Data da Compra: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+
+    if (u.phone) {
+      await sendWhatsApp(u.phone, userMsg);
+    }
+    const admins = await pool.query("SELECT phone FROM users WHERE is_admin = true AND phone IS NOT NULL AND phone != ''");
+    const adminPhones = Array.from(new Set(admins.rows.map(a => a.phone)));
+    for (const phone of adminPhones) {
+      await sendWhatsApp(phone, adminMsg);
+    }
+  } catch (error) {
+    console.error('❌ Erro ao notificar compra de saldo:', error);
   }
 };
 
@@ -179,6 +197,7 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
         CROSS JOIN generate_series(7, 22) h(h)
         CROSS JOIN rooms r
         WHERE r.locked_by_default = false
+        AND EXTRACT(ISODOW FROM d.d) != 7
 
         UNION ALL
 
@@ -214,8 +233,13 @@ app.get('/api/rooms', async (req: Request, res: Response) => {
           ON res.room_id = p.room_id 
           AND res.status != 'cancelled'
           AND tsrange(p.start_time, p.end_time) && res.booking_period
+        LEFT JOIN room_blocks rb
+          ON rb.room_id = p.room_id
+          AND rb.date = (p.start_time::date)
+          AND p.start_time::time < rb.end_time
+          AND p.end_time::time > rb.start_time
         -- Only consider slots that are in the future
-        WHERE res.id IS NULL AND p.start_time >= (NOW() AT TIME ZONE 'America/Sao_Paulo')
+        WHERE res.id IS NULL AND rb.id IS NULL AND p.start_time >= (NOW() AT TIME ZONE 'America/Sao_Paulo')
       ),
       first_available AS (
         SELECT room_id, MIN(start_time) as next_availability
@@ -304,12 +328,19 @@ app.get('/api/availability', async (req: Request, res: Response) => {
           ps.slot_start::time as start_time,
           ps.slot_end::time as end_time
         FROM possible_slots ps
-        INNER JOIN released r ON ps.slot_start::time >= r.start_time AND ps.slot_end::time <= r.end_time
+        INNER JOIN released r 
+          ON ps.slot_start::time >= r.start_time 
+          AND ps.slot_end::time <= r.end_time
         LEFT JOIN reservations res 
           ON res.room_id = $1 
           AND res.status != 'cancelled'
           AND tsrange(ps.slot_start, ps.slot_end) && res.booking_period
-        WHERE res.id IS NULL
+        LEFT JOIN room_blocks rb
+          ON rb.room_id = $1
+          AND rb.date = $2::date
+          AND ps.slot_start::time < rb.end_time
+          AND ps.slot_end::time > rb.start_time
+        WHERE res.id IS NULL AND rb.id IS NULL AND EXTRACT(ISODOW FROM $2::date) != 7
         ORDER BY ps.slot_start ASC
       `;
       const result = await pool.query(query, [roomId, date]);
@@ -337,7 +368,12 @@ app.get('/api/availability', async (req: Request, res: Response) => {
           ON res.room_id = $1
           AND res.status != 'cancelled'
           AND tsrange(hs.slot_start, hs.slot_end) && res.booking_period
-        WHERE res.id IS NULL
+        LEFT JOIN room_blocks rb
+          ON rb.room_id = $1
+          AND rb.date = $2::date
+          AND hs.slot_start::time < rb.end_time
+          AND hs.slot_end::time > rb.start_time
+        WHERE res.id IS NULL AND rb.id IS NULL AND EXTRACT(ISODOW FROM $2::date) != 7
         ORDER BY hs.slot_start ASC
       `;
       const result = await pool.query(query, [roomId, date]);
@@ -379,6 +415,11 @@ app.post('/api/reservations', authenticateToken, async (req: AuthRequest, res: R
   // Agora podemos comparar com precisão. Retiramos a tolerância errônea de 24h.
   if (requestDate.getTime() < now.getTime()) { 
     return res.status(400).json({ error: 'Não é possível agendar em horários passados.' });
+  }
+
+  // Business Rule: Sundays are closed
+  if (requestDate.getDay() === 0) {
+    return res.status(400).json({ error: 'A clínica não realiza atendimentos aos domingos.' });
   }
 
   try {
@@ -707,6 +748,11 @@ app.post('/api/admin/reservations/manual', authenticateToken, requireAdmin, asyn
 
   if (requestDate.getTime() < now.getTime()) { 
     return res.status(400).json({ error: 'Não é possível agendar em horários passados.' });
+  }
+
+  // Business Rule: Sundays are closed
+  if (requestDate.getDay() === 0) {
+    return res.status(400).json({ error: 'A clínica não realiza atendimentos aos domingos.' });
   }
 
   try {
@@ -1393,6 +1439,12 @@ app.post('/api/payments/webhook', async (req: Request, res: Response) => {
 
           console.log(`✅ Webhook MP: Pacote Integrado! Usuário ID: ${userId} recebeu +${shiftTickets} Turnos e +${hourlyTickets} Horas no Consultório ID: ${roomId}`);
         
+          // Buscar nome do pacote para a notificação
+          const paymentRecord = await pool.query("SELECT title FROM payments WHERE gateway_transaction_id = $1", [paymentId.toString()]);
+          const packageTitle = paymentRecord.rows[0]?.title || 'Pacote LIV';
+
+          await notifyBalancePurchase(userId, packageTitle, paymentData.transaction_amount, shiftTickets, hourlyTickets);
+        
         } else if (metadata?.reservation_id) {
           // Fluxo Convencional de Locação Direta (Avulso Checkout)
           const reservation_id = metadata.reservation_id;
@@ -1427,62 +1479,55 @@ app.post('/api/payments/webhook', async (req: Request, res: Response) => {
   res.sendStatus(200);
 });
 
-// Cleanup: Cancelar reservas pendentes há mais de 20 minutos (com aviso via WhatsApp)
+// PIX Reminder: Enviar aviso após 10 minutos pendente
 setInterval(async () => {
   try {
-    // Busca reservas expiradas 
-    const expiredReservations = await pool.query(`
-      SELECT r.id, u.phone
-      FROM reservations r
-      JOIN users u ON r.user_id = u.id
-      WHERE r.status = 'pending' 
-      AND r.created_at < NOW() - INTERVAL '20 minutes'
-      AND r.cancellation_notice_sent = FALSE
+    const pendingPix = await pool.query(`
+      SELECT p.id, u.phone, p.title, p.qr_code
+      FROM payments p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.payment_status = 'pending' 
+      AND p.item_type = 'package'
+      AND p.payment_reminder_sent = FALSE
+      AND p.created_at < NOW() - INTERVAL '10 minutes'
     `);
-
-    for (const res of expiredReservations.rows) {
-      if (res.phone) {
-        const cleanPhone = res.phone.replace(/\D/g, '');
-        const fullNumber = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-        const text = 'Olá! ⏰ O prazo de 20 minutos para o pagamento expirou e sua reserva de sala na *· LIV · Odontologia* foi cancelada automaticamente pelo sistema.\n\nFique à vontade para acessar o aplicativo e agendar um novo horário quando desejar!';
-
-        try {
-          const waRes = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': process.env.EVOLUTION_API_KEY || ''
-            },
-            body: JSON.stringify({
-              number: fullNumber,
-              text: text
-            })
-          });
-          if (!waRes.ok) throw new Error(`HTTP ${waRes.status}`);
-          console.log(`✅ Aviso de cancelamento WhatsApp enviado para a reserva ${res.id}`);
-        } catch (waError) {
-          console.error(`❌ Erro ao enviar aviso de cancelamento WA para a reserva ${res.id}:`, waError);
-        }
+    for (const p of pendingPix.rows) {
+      if (p.phone) {
+        const text = `Olá! Notamos que sua tentativa de compra do pacote *${p.title}* via PIX não foi concluída. ⏳\n\nO QRCode expira em breve! Segue o código Copia-e-Cola para finalizar o pagamento e liberar seu pacote instantaneamente:\n\n*${p.qr_code}*`;
+        await sendWhatsApp(p.phone, text);
       }
-
-      // 2. Atualiza o status para cancelado e marca o aviso como enviado
-      await pool.query(`
-        UPDATE reservations 
-        SET status = 'cancelled', cancellation_notice_sent = TRUE 
-        WHERE id = $1
-      `, [res.id]);
-
-      // Notificar ambos via sistema central (Usuário e Clínica)
-      notifyReservationChange(res.id as string, 'cancelled');
-    }
-
-    if (expiredReservations.rowCount && expiredReservations.rowCount > 0) {
-      console.log(`🧹 Cleanup: ${expiredReservations.rowCount} reserva(s) expirada(s) processada(s) e cancelada(s).`);
+      await pool.query("UPDATE payments SET payment_reminder_sent = TRUE WHERE id = $1", [p.id]);
+      console.log(`✅ Lembrete PIX (10min) enviado para pacote ${p.id}`);
     }
   } catch (err) {
-    console.error('❌ Erro no cleanup de reservas:', err);
+    console.error('❌ Erro no envio de lembretes PIX:', err);
   }
-}, 60000); // Roda a cada 1 minuto
+}, 60000);
+
+// PIX Expiration: Cancelar após 20 minutos (pix_expires_at)
+setInterval(async () => {
+  try {
+    const expiredPix = await pool.query(`
+      SELECT p.id, u.phone, p.title
+      FROM payments p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.payment_status = 'pending' 
+      AND p.item_type = 'package'
+      AND p.cancellation_notice_sent = FALSE
+      AND p.pix_expires_at < NOW()
+    `);
+    for (const p of expiredPix.rows) {
+      if (p.phone) {
+        const text = `Olá! O prazo para pagamento expirou e sua compra de *${p.title}* via PIX foi cancelada pelo sistema. ❌\n\nNão se preocupe, você pode gerar uma nova compra no aplicativo sempre que precisar!`;
+        await sendWhatsApp(p.phone, text);
+      }
+      await pool.query("UPDATE payments SET payment_status = 'expired', cancellation_notice_sent = TRUE WHERE id = $1", [p.id]);
+      console.log(`❌ Pix Expirado (20min) - cancelamento do pacote ${p.id} confirmado no WhatsApp.`);
+    }
+  } catch (err) {
+    console.error('❌ Erro no cancelamento por expiração de PIX:', err);
+  }
+}, 60000);
 
 // ─── TICKET PACKAGES (E-COMMERCE DINÂMICO) ──────────────────────────────────────────────────────
 
@@ -1543,59 +1588,7 @@ app.delete('/api/admin/packages/:id', authenticateToken, requireAdmin, async (re
   }
 });
 
-// Payment Reminder: Enviar WhatsApp após 10 minutos
-setInterval(async () => {
-  try {
-    const result = await pool.query(`
-      SELECT r.id, u.phone, ro.name as room_name, 
-        to_char(lower(r.booking_period) AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') as res_date,
-        to_char(lower(r.booking_period) AT TIME ZONE 'America/Sao_Paulo', 'HH24:MI') as start_time,
-        to_char(upper(r.booking_period) AT TIME ZONE 'America/Sao_Paulo', 'HH24:MI') as end_time
-      FROM reservations r
-      JOIN users u ON r.user_id = u.id
-      JOIN rooms ro ON r.room_id = ro.id
-      WHERE r.status = 'pending' 
-        AND r.payment_reminder_sent = FALSE 
-        AND r.created_at < NOW() - INTERVAL '10 minutes'
-    `);
-
-    for (const res of result.rows) {
-      if (res.phone) {
-        const cleanPhone = res.phone.replace(/\D/g, '');
-        const fullNumber = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-        const link = `${process.env.FRONTEND_URL}/reservations`;
-        const text = `Olá! Notamos que sua reserva na *${res.room_name}* no dia ${res.res_date} às ${res.start_time} - ${res.end_time} ainda está pendente. ⏳\n\nFaltam apenas 10 minutos para o cancelamento automático. Para garantir sua sala, confirme a reserva realizando o pagamento agora mesmo.\n\n🔗 *Link Seguro para Pagamento:*\n${link}`;
-
-        try {
-          const waRes = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': process.env.EVOLUTION_API_KEY || ''
-            },
-            body: JSON.stringify({
-              number: fullNumber,
-              text: text
-            })
-          });
-          
-          if (!waRes.ok) {
-            const errTxt = await waRes.text();
-            throw new Error(`Resposta Evolution API: HTTP ${waRes.status} - ${errTxt}`);
-          }
-
-          // Marcar como enviado
-          await pool.query("UPDATE reservations SET payment_reminder_sent = TRUE WHERE id = $1", [res.id]);
-          console.log(`✅ Lembrete de pagamento WhatsApp enviado para a reserva ${res.id}`);
-        } catch (waError) {
-          console.error(`❌ Erro ao enviar lembrete WA para a reserva ${res.id}:`, waError);
-        }
-      }
-    }
-  } catch (err) {
-    console.error('❌ Erro no envio de lembretes de pagamento:', err);
-  }
-}, 60000); // Roda a cada 1 minuto
+// (Deprecated Reservation Reminder Interval Removed)
 
 // Cleanup: Remover contas inativas/não-verificadas há mais de 24 horas
 setInterval(async () => {
@@ -1617,6 +1610,71 @@ setInterval(async () => {
     console.error('❌ Erro no cleanup de contas abandonadas:', err);
   }
 }, 60 * 60 * 1000); // Roda a cada 1 hora
+
+// --- ADMIN ROOM BLOCKS ---
+
+app.get('/api/admin/blocks', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Acesso negado' });
+  try {
+    const result = await pool.query(
+      `SELECT rb.*, r.name as room_name 
+       FROM room_blocks rb
+       JOIN rooms r ON rb.room_id = r.id
+       ORDER BY rb.date DESC, rb.start_time ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao buscar bloqueios' });
+  }
+});
+
+app.post('/api/admin/blocks', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Acesso negado' });
+  const { room_id, date, start_time, end_time, reason } = req.body;
+  if (!room_id || !date || !start_time || !end_time) {
+    return res.status(400).json({ error: 'Campos obrigatórios faltando.' });
+  }
+
+  try {
+    // Check if there's any active reservation overlapping the requested block
+    const overlapCheck = await pool.query(`
+      SELECT id, user_id, status 
+      FROM reservations 
+      WHERE room_id = $1 
+        AND status != 'cancelled'
+        AND booking_period && tsrange(($2 || ' ' || $3)::timestamp, ($2 || ' ' || $4)::timestamp)
+    `, [room_id, date, start_time, end_time]);
+
+    if (overlapCheck.rows.length > 0) {
+      return res.status(400).json({ 
+        error: 'Não é possível inativar a sala porque existem reservas ativas neste período. Por favor, cancele ou reagende as reservas primeiro.' 
+      });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO room_blocks (room_id, date, start_time, end_time, reason) 
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [room_id, date, start_time, end_time, reason]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao criar bloqueio' });
+  }
+});
+
+app.delete('/api/admin/blocks/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Acesso negado' });
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM room_blocks WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao remover bloqueio' });
+  }
+});
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

@@ -172,6 +172,38 @@ export default function AdminDebug() {
         }
     };
 
+    const handleSaveRow = async (entity: any, type: 'room' | 'reservation') => {
+        const typePlural = type === 'room' ? 'rooms' : 'reservations';
+        let payload = { ...entity };
+        
+        // Remove old properties if they exist
+        if (type === 'room') {
+            delete payload.hourly_rate;
+            delete payload.shift_rate;
+        }
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/${typePlural}/${entity.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${adminUser.token || ''}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                alert('Atualizado com sucesso!');
+                fetchData();
+            } else {
+                alert('Erro ao atualizar.');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Erro de conexão.');
+        }
+    };
+
     return (
         <div style={{ background: '#fcfcfc', minHeight: '100vh', padding: '40px' }}>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
@@ -216,22 +248,21 @@ export default function AdminDebug() {
                     )}
 
                     <div style={{ border: '1px solid var(--border)', borderRadius: '24px', overflowX: 'auto', background: 'white', width: '100%' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
-                            <thead style={{ background: '#f9f9f9', borderBottom: '1px solid #eee' }}>
-                                <tr>
-                                    <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DADOS</th>
-                                    <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DETALHES</th>
-                                    <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)', textAlign: 'right' }}>AÇÕES</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {activeTab === 'users' && users
-                                    .filter(u =>
+                        {activeTab === 'users' && (
+                            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
+                                <thead style={{ background: '#f9f9f9', borderBottom: '1px solid #eee' }}>
+                                    <tr>
+                                        <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DADOS</th>
+                                        <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)' }}>DETALHES</th>
+                                        <th style={{ padding: '20px', fontSize: '11px', color: 'rgba(0,0,0,0.4)', textAlign: 'right' }}>AÇÕES</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {users.filter(u =>
                                         u.name.toLowerCase().includes(searchUser.toLowerCase()) ||
                                         u.email.toLowerCase().includes(searchUser.toLowerCase()) ||
                                         (u.phone && u.phone.includes(searchUser))
-                                    )
-                                    .map(u => (
+                                    ).map(u => (
                                         <tr key={u.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
                                             <td style={{ padding: '20px' }}>
                                                 <div style={{ fontWeight: 700 }}>{u.name}</div>
@@ -253,42 +284,80 @@ export default function AdminDebug() {
                                             </td>
                                         </tr>
                                     ))}
-
-                                {activeTab === 'rooms' && rooms.map(r => (
-                                    <tr key={r.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                                        <td style={{ padding: '20px' }}>
-                                            <div style={{ fontWeight: 700 }}>{r.name}</div>
-                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{r.id}</div>
-                                        </td>
-                                        <td style={{ padding: '20px' }}>
-                                            <div style={{ fontSize: '14px' }}>Hora: R${r.hourly_rate} | Turno: R${r.shift_rate}</div>
-                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.5)' }}>Capacidade: {r.capacity}</div>
-                                        </td>
-                                        <td style={{ padding: '20px', textAlign: 'right' }}>
-                                            <button onClick={() => handleEdit(r, 'room')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
-                                            <button onClick={() => handleDelete(r.id, 'rooms')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
-                                        </td>
-                                    </tr>
+                                </tbody>
+                            </table>
+                        )}
+                        {activeTab === 'rooms' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px' }}>
+                                {rooms.map(r => (
+                                    <div key={r.id} style={{ border: '1px solid #eee', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#fafafa' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div style={{ fontSize: '11px', color: 'rgba(0,0,0,0.4)', fontWeight: 700 }}>ID: {r.id}</div>
+                                            <button onClick={() => handleDelete(r.id, 'rooms')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px', fontWeight: 600 }}>Excluir Sala</button>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                                            <div>
+                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Nome</label>
+                                                <input className="input-field" value={r.name} onChange={e => setRooms(rooms.map(rm => rm.id === r.id ? { ...rm, name: e.target.value } : rm))} style={{ background: 'white' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Capacidade</label>
+                                                <input type="number" className="input-field" value={r.capacity} onChange={e => setRooms(rooms.map(rm => rm.id === r.id ? { ...rm, capacity: parseInt(e.target.value) || 1 } : rm))} style={{ background: 'white' }} />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Descrição</label>
+                                            <textarea className="input-field" value={r.description || ''} onChange={e => setRooms(rooms.map(rm => rm.id === r.id ? { ...rm, description: e.target.value } : rm))} style={{ background: 'white', minHeight: '60px' }} />
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                            <button onClick={() => handleSaveRow(r, 'room')} style={{ background: 'black', color: 'white', padding: '10px 24px', borderRadius: '12px', border: 'none', fontWeight: 700, cursor: 'pointer' }}>Salvar Alterações</button>
+                                        </div>
+                                    </div>
                                 ))}
-
-                                {activeTab === 'reservations' && reservations.map(res => (
-                                    <tr key={res.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                                        <td style={{ padding: '20px' }}>
-                                            <div style={{ fontWeight: 700 }}>Sala: {res.room_name || res.room_id}</div>
-                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)' }}>{res.id}</div>
-                                        </td>
-                                        <td style={{ padding: '20px' }}>
-                                            <div style={{ fontSize: '13px' }}>Usuário: {res.user_name || res.user_id}</div>
-                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.5)' }}>Status: {res.status.toUpperCase()} | R${res.total_price}</div>
-                                        </td>
-                                        <td style={{ padding: '20px', textAlign: 'right' }}>
-                                            <button onClick={() => handleEdit(res, 'reservation')} style={{ marginRight: '8px', border: 'none', background: 'none', cursor: 'pointer', color: 'blue', fontSize: '12px' }}>Editar</button>
-                                            <button onClick={() => handleDelete(res.id, 'reservations')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px' }}>Excluir</button>
-                                        </td>
-                                    </tr>
+                            </div>
+                        )}
+                        {activeTab === 'reservations' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px' }}>
+                                {reservations.map(res => (
+                                    <div key={res.id} style={{ border: '1px solid #eee', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', background: '#fafafa' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div style={{ fontSize: '11px', color: 'rgba(0,0,0,0.4)', fontWeight: 700 }}>ID: {res.id} | Criada em: {new Date(res.created_at).toLocaleString()}</div>
+                                            <button onClick={() => handleDelete(res.id, 'reservations')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'red', fontSize: '12px', fontWeight: 600 }}>Excluir Reserva</button>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                                            <div>
+                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>User ID</label>
+                                                <input className="input-field" value={res.user_id} onChange={e => setReservations(reservations.map(rs => rs.id === res.id ? { ...rs, user_id: e.target.value } : rs))} style={{ background: 'white' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Room ID</label>
+                                                <input className="input-field" value={res.room_id} onChange={e => setReservations(reservations.map(rs => rs.id === res.id ? { ...rs, room_id: e.target.value } : rs))} style={{ background: 'white' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Período Daterange</label>
+                                                <input className="input-field" value={res.booking_period} onChange={e => setReservations(reservations.map(rs => rs.id === res.id ? { ...rs, booking_period: e.target.value } : rs))} style={{ background: 'white' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Status</label>
+                                                <select className="input-field" value={res.status} onChange={e => setReservations(reservations.map(rs => rs.id === res.id ? { ...rs, status: e.target.value } : rs))} style={{ background: 'white' }}>
+                                                    <option value="pending">Aguardando Pagamento</option>
+                                                    <option value="confirmed">Confirmado</option>
+                                                    <option value="cancelled">Cancelado</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.6)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Preço Total (R$)</label>
+                                                <input type="number" step="0.01" className="input-field" value={res.total_price} onChange={e => setReservations(reservations.map(rs => rs.id === res.id ? { ...rs, total_price: parseFloat(e.target.value) || 0 } : rs))} style={{ background: 'white' }} />
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '16px' }}>
+                                            <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)', fontWeight: 600 }}>Usuário: {res.user_name} | Sala: {res.room_name}</div>
+                                            <button onClick={() => handleSaveRow(res, 'reservation')} style={{ background: 'black', color: 'white', padding: '10px 24px', borderRadius: '12px', border: 'none', fontWeight: 700, cursor: 'pointer' }}>Salvar Alterações</button>
+                                        </div>
+                                    </div>
                                 ))}
-                            </tbody>
-                        </table>
+                            </div>
+                        )}
                     </div>
                 </>
             )}
@@ -322,42 +391,6 @@ export default function AdminDebug() {
                                             <input type="checkbox" checked={editingEntity.is_admin} onChange={e => setEditingEntity({ ...editingEntity, is_admin: e.target.checked })} />
                                             É Administrador?
                                         </label>
-                                    </>
-                                )}
-
-                                {editType === 'room' && (
-                                    <>
-                                        <div>
-                                            <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>Nome</label>
-                                            <input className="input-field" value={editingEntity.name} onChange={e => setEditingEntity({ ...editingEntity, name: e.target.value })} required />
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '10px' }}>
-                                            <div style={{ flex: 1 }}>
-                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>Valor Hora</label>
-                                                <input type="number" step="0.01" className="input-field" value={editingEntity.hourly_rate} onChange={e => setEditingEntity({ ...editingEntity, hourly_rate: parseFloat(e.target.value) })} required />
-                                            </div>
-                                            <div style={{ flex: 1 }}>
-                                                <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>Valor Turno</label>
-                                                <input type="number" step="0.01" className="input-field" value={editingEntity.shift_rate} onChange={e => setEditingEntity({ ...editingEntity, shift_rate: parseFloat(e.target.value) })} required />
-                                            </div>
-                                        </div>
-                                    </>
-                                )}
-
-                                {editType === 'reservation' && (
-                                    <>
-                                        <div>
-                                            <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>Status</label>
-                                            <select className="input-field" value={editingEntity.status} onChange={e => setEditingEntity({ ...editingEntity, status: e.target.value })}>
-                                                <option value="pending">Pending</option>
-                                                <option value="confirmed">Confirmed</option>
-                                                <option value="cancelled">Cancelled</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase' }}>Preço Total</label>
-                                            <input type="number" step="0.01" className="input-field" value={editingEntity.total_price} onChange={e => setEditingEntity({ ...editingEntity, total_price: parseFloat(e.target.value) })} required />
-                                        </div>
                                     </>
                                 )}
 

@@ -51,7 +51,7 @@ function getSafeDate(dateString: string) {
 }
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'reservations' | 'rooms' | 'exclusive_rooms' | 'users' | 'packages' | 'add_balance'>('reservations');
+  const [activeTab, setActiveTab] = useState<'reservations' | 'rooms' | 'exclusive_rooms' | 'users' | 'packages' | 'add_balance' | 'inactive_rooms'>('reservations');
   const [reservations, setReservations] = useState<AdminReservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [userStats, setUserStats] = useState<UserStats[]>([]);
@@ -64,7 +64,7 @@ export default function AdminDashboard() {
   const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [calendarRange, setCalendarRange] = useState<'week' | 'month'>('week');
-  const [roomsSubTab, setRoomsSubTab] = useState<'list' | 'exclusive'>('list');
+  const [roomsSubTab, setRoomsSubTab] = useState<'list' | 'exclusive' | 'blocks'>('list');
   const [exclusiveViewMode, setExclusiveViewMode] = useState<'table' | 'calendar'>('table');
   const [selectedDayReservations, setSelectedDayReservations] = useState<AdminReservation[] | null>(null);
   const [selectedDayLabel, setSelectedDayLabel] = useState<string>('');
@@ -168,6 +168,10 @@ export default function AdminDashboard() {
   const [releaseAvailableSlots, setReleaseAvailableSlots] = useState<any[]>([]);
   const [isFetchingReleaseAvailability, setIsFetchingReleaseAvailability] = useState(false);
 
+  // Room Blocks
+  const [roomBlocks, setRoomBlocks] = useState<any[]>([]);
+  const [blockForm, setBlockForm] = useState({ room_id: '', date: '', start_time: '08:00', end_time: '12:00', reason: '' });
+
   const router = useRouter();
 
   const fetchData = async () => {
@@ -227,6 +231,15 @@ export default function AdminDashboard() {
         if (releasedRes.ok) {
           const releasedData = await releasedRes.json();
           setReleasedSlots(releasedData);
+        }
+
+        // Fetch Room Blocks
+        const blocksRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/blocks`, {
+          headers: { 'Authorization': `Bearer ${userData.token || ''}` }
+        });
+        if (blocksRes.ok) {
+          const blocksData = await blocksRes.json();
+          setRoomBlocks(blocksData);
         }
       } catch (err: any) {
         console.error('Fetch error:', err);
@@ -303,9 +316,52 @@ export default function AdminDashboard() {
         setReleasedSlots([newSlot, ...releasedSlots]);
         setReleaseForm({ ...releaseForm, date: '' });
       } else {
-        alert('Erro ao liberar horário.');
+        alert('Erro ao remover liberação.');
       }
-    } catch { console.error('Error creating release'); }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreateBlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!blockForm.room_id || !blockForm.date || !blockForm.start_time || !blockForm.end_time) return alert('Preencha os campos obrigatórios.');
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/blocks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${user.token || ''}` },
+        body: JSON.stringify(blockForm)
+      });
+      if (res.ok) {
+        alert('Sala inativada com sucesso.');
+        setBlockForm({ room_id: '', date: '', start_time: '08:00', end_time: '12:00', reason: '' });
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Erro ao inativar sala.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro de conexão ao criar inativação.');
+    }
+  };
+
+  const handleDeleteBlock = async (id: string) => {
+    if (!confirm('Deseja realmente remover esta inativação?')) return;
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/blocks/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.token || ''}` }
+      });
+      if (res.ok) {
+        alert('Inativação removida, sala disponível novamente.');
+        fetchData();
+      } else {
+        alert('Erro ao remover inativação.');
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleDeleteRelease = async (id: string) => {
@@ -748,7 +804,7 @@ export default function AdminDashboard() {
           </div>
           <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', margin: '0 auto', color: 'black' }}>
             {activeTab === 'reservations' ? 'Sala de controle' : 
-             activeTab === 'rooms' ? (roomsSubTab === 'list' ? 'Gerenciar Salas' : 'Liberações Manuais - Consultório 3') : 
+             activeTab === 'rooms' ? (roomsSubTab === 'list' ? 'Gerenciar Salas' : roomsSubTab === 'exclusive' ? 'Liberações Manuais - Consultório 3' : 'Inativar Salas') : 
              activeTab === 'add_balance' ? 'Gerenciar Créditos' :
              activeTab === 'packages' ? 'Gestão de Pacotes' :
              activeTab === 'users' ? 'Estatísticas de Usuários' :
@@ -810,19 +866,11 @@ export default function AdminDashboard() {
                     })}
                   </select>
                 </div>
-                <div style={{ flex: '1 1 200px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Status</label>
-                  <select className="input-field" value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}>
-                    <option value="">Todos os status</option>
-                    <option value="confirmed">Confirmado</option>
-                    <option value="pending">Aguardando Pagamento</option>
-                    <option value="cancelled">Cancelado</option>
-                  </select>
-                </div>
+
 
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: '12px' }}>
                   <button
-                    onClick={() => { setSelectedProfessional(''); setSelectedRoom(''); setSelectedMonth(''); setSelectedStatus(''); }}
+                    onClick={() => { setSelectedProfessional(''); setSelectedRoom(''); setSelectedMonth(''); }}
                     style={{
                       height: '50px',
                       padding: '0 24px',
@@ -926,9 +974,6 @@ export default function AdminDashboard() {
                       <th style={{ padding: '20px' }}>PROFISSIONAL</th>
                       <th style={{ padding: '20px' }}>SALA</th>
                       <th style={{ padding: '20px' }}>PERÍODO</th>
-                      <th style={{ padding: '20px' }}>STATUS</th>
-                      <th style={{ padding: '20px' }}>TEMPO</th>
-                      <th style={{ padding: '20px' }}>VALOR</th>
                       <th style={{ padding: '20px' }}>AÇÃO</th>
                     </tr>
                   </thead>
@@ -959,8 +1004,8 @@ export default function AdminDashboard() {
                               const cleanStr = res.booking_period.replace(/[\"\[\)]/g, '');
                               const [start, end] = cleanStr.split(',');
                               if (!start || !end) return cleanStr;
-                              const startDate = new Date(start);
-                              const endDate = new Date(end);
+                              const startDate = getSafeDate(start);
+                              const endDate = getSafeDate(end);
                               const dateStr = startDate.toLocaleDateString('pt-BR');
                               const startTime = startDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                               const endTime = endDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -969,45 +1014,6 @@ export default function AdminDashboard() {
                               return res.booking_period.replace(/[\"\[\)]/g, '').replace(',', ' até ');
                             }
                           })()}
-                        </td>
-                        <td style={{ padding: '20px' }}>
-                          {(() => {
-                            const created = new Date(res.created_at);
-                            const diffMs = nowUTC.getTime() - created.getTime();
-                            const diffSecs = Math.floor(diffMs / 1000);
-                            const remainingSecs = (20 * 60) - diffSecs;
-                            const isExpired = res.status === 'pending' && remainingSecs <= 0;
-
-                            return (
-                              <span style={{
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                fontSize: '11px',
-                                fontWeight: 600,
-                                background: res.status === 'confirmed' ? 'rgba(52,199,89,0.1)' : (isExpired || res.status === 'cancelled' ? 'rgba(255,59,48,0.1)' : 'rgba(255,149,0,0.1)'),
-                                color: res.status === 'confirmed' ? '#248a3d' : (isExpired || res.status === 'cancelled' ? '#ff3b30' : '#ff9500')
-                              }}>
-                                {res.status === 'confirmed' ? 'CONFIRMADO' : (isExpired ? 'CANCELADO (SEM PAGAMENTO)' : (res.status === 'pending' ? 'AGUARDANDO PAGAMENTO' : 'CANCELADO'))}
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td style={{ padding: '20px', fontSize: '12px', fontWeight: 600, color: 'rgba(0,0,0,0.4)' }}>
-                          {(() => {
-                            if (res.status !== 'pending') return '-';
-                            const created = new Date(res.created_at);
-                            const diffMs = nowUTC.getTime() - created.getTime();
-                            const diffSecs = Math.floor(diffMs / 1000);
-                            const remainingSecs = (20 * 60) - diffSecs;
-
-                            if (remainingSecs <= 0) return '00:00';
-                            const mins = Math.floor(remainingSecs / 60);
-                            const secs = remainingSecs % 60;
-                            return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-                          })()}
-                        </td>
-                        <td style={{ padding: '20px', fontWeight: 600 }}>
-                          R$ {Number(res.total_price).toFixed(2)}
                         </td>
                         <td style={{ padding: '20px' }}>
                           {res.status === 'confirmed' && (
@@ -1501,6 +1507,24 @@ export default function AdminDashboard() {
               >
                 Liberações manuais
               </button>
+              <button
+                onClick={() => setRoomsSubTab('blocks')}
+                style={{
+                  flex: isAdminMobile ? 1 : 'none',
+                  padding: '10px 24px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: roomsSubTab === 'blocks' ? 'white' : 'transparent',
+                  color: roomsSubTab === 'blocks' ? 'black' : 'rgba(0,0,0,0.4)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: roomsSubTab === 'blocks' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                  transition: 'all 0.2s',
+                  fontSize: isAdminMobile ? '12px' : '14px'
+                }}
+              >
+                Inativar Salas
+              </button>
             </div>
 
             {roomsSubTab === 'list' ? (
@@ -1510,8 +1534,6 @@ export default function AdminDashboard() {
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'rgba(0,0,0,0.4)', background: 'var(--secondary)' }}>
                         <th style={{ padding: '20px' }}>NOME DA SALA</th>
-                        <th style={{ padding: '20px' }}>VALOR/HORA</th>
-                        <th style={{ padding: '20px' }}>VALOR/TURNO (4H)</th>
                         <th style={{ padding: '20px' }}>CAPACIDADE</th>
                         <th style={{ padding: '20px' }}>AÇÕES</th>
                       </tr>
@@ -1525,8 +1547,6 @@ export default function AdminDashboard() {
                               {room.description}
                             </div>
                           </td>
-                          <td style={{ padding: '20px', fontWeight: 600 }}>R$ {Number(room.hourly_rate).toFixed(2)}</td>
-                          <td style={{ padding: '20px', fontWeight: 600 }}>R$ {Number(room.shift_rate).toFixed(2)}</td>
                           <td style={{ padding: '20px' }}>{room.capacity} pessoas</td>
                           <td style={{ padding: '20px' }}>
                             <div style={{ display: 'flex', gap: '8px' }}>
@@ -1567,7 +1587,7 @@ export default function AdminDashboard() {
                   </table>
                 </div>
               </div>
-            ) : (
+            ) : roomsSubTab === 'exclusive' ? (
               <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '32px' }}>
                 <div style={{ background: 'white', padding: '24px', borderRadius: '24px', border: '1px solid var(--border)', width: '100%' }}>
                   <h3 style={{ marginBottom: '16px', fontWeight: 600 }}>Liberar Novo Horário - Sala Consultório 3</h3>
@@ -1731,7 +1751,73 @@ export default function AdminDashboard() {
                   )}
                 </div>
               </div>
-            )}
+            ) : roomsSubTab === 'blocks' ? (
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+                {/* Form to Create Block */}
+                <div style={{ background: 'white', padding: '32px', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 10px 30px rgba(0,0,0,0.02)' }}>
+                  <h2 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '24px', letterSpacing: '-0.02em', color: 'black' }}>
+                    Nova Inativação
+                  </h2>
+                  <form onSubmit={handleCreateBlock} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 200px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Sala</label>
+                        <select className="input-field" value={blockForm.room_id} onChange={e => setBlockForm({ ...blockForm, room_id: e.target.value })} required>
+                          <option value="">Selecione a Sala</option>
+                          {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        </select>
+                      </div>
+                      <div style={{ flex: '1 1 200px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Data</label>
+                        <input type="date" className="input-field" value={blockForm.date} onChange={e => setBlockForm({ ...blockForm, date: e.target.value })} required />
+                      </div>
+                      <div style={{ flex: '1 1 150px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Hora Inicial</label>
+                        <input type="time" className="input-field" value={blockForm.start_time} onChange={e => setBlockForm({ ...blockForm, start_time: e.target.value })} required />
+                      </div>
+                      <div style={{ flex: '1 1 150px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Hora Final</label>
+                        <input type="time" className="input-field" value={blockForm.end_time} onChange={e => setBlockForm({ ...blockForm, end_time: e.target.value })} required />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Motivo (Opcional)</label>
+                      <input type="text" className="input-field" placeholder="Ex: Manutenção do Ar Condicionado" value={blockForm.reason} onChange={e => setBlockForm({ ...blockForm, reason: e.target.value })} />
+                    </div>
+                    <button type="submit" style={{ alignSelf: 'flex-start', background: 'red', color: 'white', padding: '16px 32px', borderRadius: '16px', border: 'none', fontWeight: 700, fontSize: '14px', cursor: 'pointer' }}>
+                      Inativar Sala Neste Período
+                    </button>
+                  </form>
+                </div>
+
+                {/* List of Active Blocks */}
+                <div style={{ background: 'white', padding: '32px', borderRadius: '24px', border: '1px solid var(--border)', boxShadow: '0 10px 30px rgba(0,0,0,0.02)' }}>
+                  <h2 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '24px', letterSpacing: '-0.02em', color: 'black' }}>
+                    Salas Inativas 
+                  </h2>
+                  {roomBlocks.length === 0 ? (
+                    <div style={{ color: 'rgba(0,0,0,0.4)', fontSize: '14px', fontWeight: 500 }}>Nenhuma sala inativada no momento.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {roomBlocks.map(block => (
+                        <div key={block.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa', padding: '20px', borderRadius: '16px', border: '1px solid #eee', flexWrap: 'wrap', gap: '12px' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '16px', color: 'black', marginBottom: '4px' }}>{block.room_name}</div>
+                            <div style={{ fontSize: '13px', color: 'rgba(0,0,0,0.6)', fontWeight: 500 }}>
+                              Data: {new Date(block.date.split('T')[0] + 'T12:00:00-03:00').toLocaleDateString('pt-BR')} | Horário: {block.start_time.substring(0, 5)} - {block.end_time.substring(0, 5)}
+                            </div>
+                            {block.reason && <div style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)', marginTop: '4px' }}>Motivo: {block.reason}</div>}
+                          </div>
+                          <button onClick={() => handleDeleteBlock(block.id)} style={{ background: 'white', border: '1px solid var(--border)', padding: '10px 20px', borderRadius: '12px', cursor: 'pointer', color: 'black', fontWeight: 700, fontSize: '12px' }}>
+                            Reativar Sala
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : activeTab === 'users' ? (
           <div style={{ width: '100%' }}>
@@ -2151,32 +2237,17 @@ export default function AdminDashboard() {
                   </div>
                   <div style={{ display: 'flex', gap: '16px' }}>
                     <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Valor/Hora (R$)</label>
-                      <input
-                        type="number" step="0.01" required
-                        className="input-field"
-                        value={roomForm.hourly_rate}
-                        onChange={e => setRoomForm({ ...roomForm, hourly_rate: parseFloat(e.target.value) })}
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Capacidade</label>
+                      <input 
+                        type="number" 
+                        min="1"
+                        className="input-field" 
+                        value={roomForm.capacity} 
+                        onChange={(e) => setRoomForm({...roomForm, capacity: parseInt(e.target.value) || 1})} 
+                        required 
+                        style={{ background: 'white', border: '1px solid var(--border)' }}
                       />
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Valor/Turno (R$)</label>
-                      <input
-                        type="number" step="0.01" required
-                        className="input-field"
-                        value={roomForm.shift_rate}
-                        onChange={e => setRoomForm({ ...roomForm, shift_rate: parseFloat(e.target.value) })}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(0,0,0,0.4)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Capacidade (Pessoas)</label>
-                    <input
-                      type="number" required
-                      className="input-field"
-                      value={roomForm.capacity}
-                      onChange={e => setRoomForm({ ...roomForm, capacity: parseInt(e.target.value) })}
-                    />
                   </div>
 
                   {/* FOTOS */}
