@@ -32,7 +32,10 @@ export function Header() {
             const data = await res.json();
             setUser({ ...data, token: parsedNode.token });
           } else {
-            setUser(parsedNode);
+            // Se o token expirou ou falhou, removemos do localStorage
+            localStorage.removeItem('roomrental_user');
+            setUser(null);
+            router.push('/login');
           }
         } catch(e) {
           setUser(parsedNode);

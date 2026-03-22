@@ -39,6 +39,7 @@ export default function ProfilePage() {
           setUser({ ...userData, token: parsedNode.token });
           setRooms(roomsData);
         } else {
+          localStorage.removeItem('roomrental_user');
           router.push('/login');
         }
       } catch (err) {
@@ -102,7 +103,7 @@ export default function ProfilePage() {
   };
 
   // Componente interno para o Timer Regressivo
-  const Countdown = ({ expiresAt }: { expiresAt: string }) => {
+  const Countdown = ({ expiresAt, color = '#ff9500' }: { expiresAt: string, color?: string }) => {
     const [timeLeft, setTimeLeft] = useState<string>('');
     const [isExpired, setIsExpired] = useState(false);
 
@@ -128,9 +129,12 @@ export default function ProfilePage() {
     if (isExpired) return <span style={{ color: '#ff3b30', fontWeight: 700 }}>EXPIRADO</span>;
 
     return (
-      <span style={{ fontSize: '13px', color: '#ff9500', fontWeight: 600 }}>
-        Expira em: <strong style={{ fontSize: '15px' }}>{timeLeft}</strong>
-      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+        <div className="pulse-dot" style={{ backgroundColor: color }}></div>
+        <span style={{ fontSize: '13px', color: color, fontWeight: 600 }}>
+          Expira em: <strong style={{ fontSize: '15px' }}>{timeLeft}</strong>
+        </span>
+      </div>
     );
   };
 
@@ -139,24 +143,26 @@ export default function ProfilePage() {
       <Header />
       <main className="main-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', paddingBottom: '100px' }}>
         <section style={{ marginBottom: '40px', textAlign: 'center', width: '100%' }}>
-          <h1 style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', marginBottom: '12px', color: 'black' }}>
+          <h1 className="profile-title" style={{ fontSize: '48px', fontWeight: 700, letterSpacing: '-0.04em', marginBottom: '12px', color: 'black' }}>
             Meu Perfil.
           </h1>
-          <p style={{ fontSize: '20px', color: 'rgba(0,0,0,0.5)' }}>
+          <p className="profile-subtitle" style={{ fontSize: '20px', color: 'rgba(0,0,0,0.5)' }}>
             Gerencie seus dados e acompanhe seus pacotes por consultório.
           </p>
         </section>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '48px', padding: '6px', background: 'rgba(0,0,0,0.03)', borderRadius: '16px' }}>
+        <div className="tabs-container" style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '48px', padding: '6px', background: 'rgba(0,0,0,0.03)', borderRadius: '16px' }}>
           <button 
             onClick={() => setActiveTab('info')}
+            className="tab-button"
             style={{ padding: '12px 24px', borderRadius: '12px', border: 'none', background: activeTab === 'info' ? 'white' : 'transparent', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'all 0.3s', boxShadow: activeTab === 'info' ? '0 4px 12px rgba(0,0,0,0.05)' : 'none' }}
           >
             Dados & Pacotes
           </button>
           <button 
            onClick={() => setActiveTab('history')}
+           className="tab-button"
            style={{ padding: '12px 24px', borderRadius: '12px', border: 'none', background: activeTab === 'history' ? 'white' : 'transparent', fontWeight: 600, fontSize: '14px', cursor: 'pointer', transition: 'all 0.3s', boxShadow: activeTab === 'history' ? '0 4px 12px rgba(0,0,0,0.05)' : 'none' }}
           >
             Histórico de Compras
@@ -169,6 +175,7 @@ export default function ProfilePage() {
               {/* Dados Cadastrais */}
               <motion.div 
                 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                className="profile-grid-item"
                 style={{ flex: '1 1 400px', background: 'white', borderRadius: '24px', padding: '40px', boxShadow: '0 4px 20px rgba(0,0,0,0.03)', border: '1px solid var(--border)' }}
               >
                 <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '24px', borderBottom: '1px solid #eee', paddingBottom: '16px' }}>
@@ -213,6 +220,7 @@ export default function ProfilePage() {
               {/* Pacotes por Consultório */}
               <motion.div 
                 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                className="profile-grid-item"
                 style={{ flex: '1 1 400px', display: 'flex', flexDirection: 'column', gap: '24px' }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -257,44 +265,31 @@ export default function ProfilePage() {
                   {history.map((order) => (
                     <div 
                       key={order.id} 
-                      style={{ 
-                        background: 'white', 
-                        borderRadius: '20px', 
-                        padding: '24px', 
-                        border: '1px solid var(--border)', 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center',
-                        gap: '20px'
-                      }}
+                      className="purchase-card"
                     >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: getStatusColor(order.current_status), textTransform: 'uppercase' }}>
+                      <div className="purchase-card-info">
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 700, color: getStatusColor(order.current_status), textTransform: 'uppercase' }}>
                             {getStatusLabel(order.current_status)}
                           </span>
                           {order.current_status === 'pending' && order.pix_expires_at && (
-                             <>
-                               <span style={{ color: 'rgba(0,0,0,0.2)' }}>•</span>
-                               <Countdown expiresAt={order.pix_expires_at} />
-                             </>
+                             <Countdown expiresAt={order.pix_expires_at} color={getStatusColor(order.current_status)} />
                           )}
-                          <span style={{ color: 'rgba(0,0,0,0.2)' }}>•</span>
-                          <span style={{ fontSize: '13px', color: 'rgba(0,0,0,0.4)' }}>
-                            {new Date(order.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </span>
                         </div>
-                        <h4 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>{order.title || 'Compra de Saldo'}</h4>
-                        <p style={{ fontSize: '14px', color: 'rgba(0,0,0,0.5)' }}>Para o {order.room_name || 'Consultório selecionado'}</p>
+                        <h4 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>{order.title || 'Compra de Saldo'}</h4>
+                        <p style={{ fontSize: '16px', color: 'rgba(0,0,0,0.5)', marginBottom: '16px' }}>Para o {order.room_name || 'Consultório selecionado'}</p>
+                        <span style={{ fontSize: '12px', color: 'rgba(0,0,0,0.4)', display: 'block' }}>
+                          Realizado em {new Date(order.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
                       </div>
                       
-                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <div style={{ fontSize: '20px', fontWeight: 800 }}>R$ {Number(order.amount_paid).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                      <div className="purchase-card-amount">
+                        <div style={{ fontSize: '32px', fontWeight: 800, color: 'var(--foreground)' }}>R$ {Number(order.amount_paid).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                         {order.current_status === 'pending' && (
                           <button 
                             onClick={() => setShowPixModal(order)}
                             style={{ 
-                              background: '#007aff', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '10px', fontWeight: 600, fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' 
+                              background: '#007aff', color: 'white', border: 'none', padding: '14px 40px', borderRadius: '14px', fontWeight: 700, fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' 
                             }}
                           >
                             <span>QR Code</span> ➔

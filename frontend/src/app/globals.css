@@ -50,9 +50,7 @@ header {
   left: 0;
   right: 0;
   height: 80px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  background: #ffffff;
   border-bottom: 1px solid rgba(0,0,0,0.06);
   z-index: 1000;
   display: flex;
@@ -444,6 +442,21 @@ button.primary-btn:hover {
   }
 }
 
+@keyframes pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 8px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
 .skeleton-card {
   height: 250px;
   border-radius: 18px;
@@ -578,4 +591,95 @@ button.primary-btn:hover {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   color: transparent;
+}
+
+/* Histórico de Compras e Perfil Responsivo */
+.purchase-card {
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 24px;
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.purchase-card-info {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.purchase-card-amount {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px dashed rgba(0,0,0,0.1);
+  padding-top: 24px;
+}
+
+@media (max-width: 768px) {
+  .purchase-card {
+    padding: 24px;
+    gap: 20px;
+  }
+  
+  .purchase-card-amount {
+    padding-top: 20px;
+    margin-top: 0;
+    gap: 16px;
+  }
+
+  .purchase-card-amount button {
+    width: 100%;
+    justify-content: center;
+    padding: 14px 24px !important;
+  }
+
+  .profile-title {
+    font-size: 32px !important;
+  }
+
+  .profile-subtitle {
+    font-size: 16px !important;
+  }
+
+  .tabs-container {
+    width: 100% !important;
+    overflow-x: auto;
+    justify-content: center !important;
+    padding: 6px !important;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tabs-container::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab-button {
+    padding: 10px 16px !important;
+    font-size: 13px !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .profile-grid-item {
+    flex: 1 1 100% !important;
+  }
+
+  .profile-grid-item > div,
+  .profile-grid-item {
+    padding: 24px !important;
+  }
 }

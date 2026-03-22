@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict ceHAm6hK0shabJhKOhwf8fcAkk5NAbtGYcouGNd6f83nCsuqwxk6uPCKnaZH1oJ
+\restrict qMrlPwpL1YWfTJXGieu6SQJMQURF0x3GUDTzCpPxnqsCv9OyHHri2eaaH3SPzOY
 
 -- Dumped from database version 16.13
 -- Dumped by pg_dump version 16.13
@@ -46,7 +46,15 @@ CREATE TABLE public.payments (
     gateway_transaction_id character varying(255),
     payment_status character varying(50),
     amount_paid numeric(10,2),
-    updated_at timestamp with time zone DEFAULT now()
+    updated_at timestamp with time zone DEFAULT now(),
+    user_id uuid,
+    room_id uuid,
+    title character varying(255),
+    item_type character varying(20) DEFAULT 'reservation'::character varying,
+    qr_code text,
+    qr_code_64 text,
+    pix_expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now()
 );
 
 
@@ -99,7 +107,10 @@ CREATE TABLE public.rooms (
     shift_rate numeric(10,2) NOT NULL,
     capacity integer NOT NULL,
     created_at timestamp with time zone DEFAULT now(),
-    locked_by_default boolean DEFAULT false
+    locked_by_default boolean DEFAULT false,
+    photo1 text,
+    photo2 text,
+    photo3 text
 );
 
 
@@ -178,7 +189,8 @@ ALTER TABLE public.verification_codes OWNER TO postgres;
 -- Data for Name: payments; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY public.payments (id, reservation_id, gateway_transaction_id, payment_status, amount_paid, updated_at) FROM stdin;
+COPY public.payments (id, reservation_id, gateway_transaction_id, payment_status, amount_paid, updated_at, user_id, room_id, title, item_type, qr_code, qr_code_64, pix_expires_at, created_at) FROM stdin;
+02bb4334-e76c-48f2-91a0-57856f3f999e	\N	151304841598	pending	270.00	2026-03-21 08:23:27.23161+00	0fa611b2-b287-4ad5-b793-d03408462b4b	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	1 Turno (C3)	package	00020126580014br.gov.bcb.pix0136561933af-f49c-49c1-b6a8-4b45c18bdbfd5204000053039865406270.005802BR5914THOMASAMARANTE6009Sao Paulo62250521mpqrinter151304841598630437BB	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	2026-03-21 08:43:25.974+00	2026-03-21 08:23:27.23161+00
 \.
 
 
@@ -188,6 +200,7 @@ COPY public.payments (id, reservation_id, gateway_transaction_id, payment_status
 
 COPY public.released_slots (id, room_id, date, start_time, end_time, created_at) FROM stdin;
 8a9a482e-4786-472c-b089-bbd9d5a43112	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	2026-03-16	13:00:00	23:00:00	2026-03-13 00:02:43.024983+00
+97cc170f-a303-439e-be49-25a122141c93	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	2026-03-20	08:00:00	12:00:00	2026-03-20 03:53:03.243501+00
 \.
 
 
@@ -197,13 +210,19 @@ COPY public.released_slots (id, room_id, date, start_time, end_time, created_at)
 
 COPY public.reservations (id, room_id, user_id, booking_period, status, total_price, created_at, payment_reminder_sent, cancellation_notice_sent) FROM stdin;
 b258cf4d-862a-46b7-8f8a-03fabed405f9	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-11 13:00:00","2026-03-11 17:00:00")	cancelled	600.00	2026-03-07 20:02:53.751893+00	f	f
+8e2a5c91-01b7-4192-bc3a-6c95d41c3109	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-20 13:00:00","2026-03-20 14:00:00")	confirmed	0.00	2026-03-20 03:13:07.97158+00	f	f
 d4d21c63-b7a0-4914-9f7a-e2ac2b412c9f	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	dd8376c9-596f-4982-a94a-1b96d9a1f0b9	["2026-03-08 14:00:00","2026-03-08 18:00:00")	cancelled	500.00	2026-03-07 22:51:18.493881+00	t	f
 3bbc23d9-2df8-488b-9193-768f0154c619	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	dd8376c9-596f-4982-a94a-1b96d9a1f0b9	["2026-03-09 10:00:00","2026-03-09 12:00:00")	cancelled	200.00	2026-03-07 22:58:36.77838+00	t	t
+818bfd94-17e4-4095-ac8d-6a02c80a2c30	d93d2b37-3720-4298-b70b-aaf8a94acee0	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-20 10:30:00","2026-03-20 11:30:00")	confirmed	0.00	2026-03-20 03:13:51.89912+00	f	f
 786ebae0-c576-4886-9591-3bd1d40bc694	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-09 09:00:00","2026-03-09 10:00:00")	cancelled	110.00	2026-03-07 23:16:47.458791+00	t	t
 e56fd500-41b4-4d1b-8fc5-6daab177ce6c	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-16 09:00:00","2026-03-16 10:00:00")	cancelled	180.00	2026-03-09 03:04:26.731011+00	t	t
+85cf8c45-f05a-4236-aa47-feb5e94016b6	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-20 10:30:00","2026-03-20 11:30:00")	confirmed	0.00	2026-03-20 03:14:42.94545+00	f	f
 ac94b518-5e70-4e7b-821b-cb81ee73faef	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-10 10:00:00","2026-03-10 11:00:00")	cancelled	110.00	2026-03-10 03:08:46.08532+00	t	t
+9c757769-d736-4096-8ba5-96ea3b650da4	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-20 11:30:00","2026-03-20 12:30:00")	confirmed	0.00	2026-03-20 03:17:03.890263+00	f	f
 7f89521a-c846-42ef-b202-073aa76142aa	d93d2b37-3720-4298-b70b-aaf8a94acee0	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-11 07:00:00","2026-03-11 08:00:00")	cancelled	80.00	2026-03-10 03:28:50.941982+00	t	t
+f4f58f35-7af9-4bdf-9ccc-34826aa3adad	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-20 10:30:00","2026-03-20 11:30:00")	confirmed	0.00	2026-03-20 03:53:27.141134+00	f	f
 edc259f7-aefe-4f43-805b-fd9d60b17464	d93d2b37-3720-4298-b70b-aaf8a94acee0	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-18 20:00:00","2026-03-18 21:00:00")	cancelled	80.00	2026-03-10 03:48:25.338196+00	t	t
+e736dbc1-73c3-4c09-bd6e-42e07b9295f8	d93d2b37-3720-4298-b70b-aaf8a94acee0	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-20 15:00:00","2026-03-20 20:00:00")	confirmed	0.00	2026-03-20 03:57:47.200785+00	f	f
 60c836d1-5d4e-471f-a001-b661ac5bb2bc	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-10 07:00:00","2026-03-10 08:00:00")	cancelled	110.00	2026-03-10 23:46:57.315895+00	t	t
 f0776c0b-dc92-4bb3-9533-0599bf812a11	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-10 07:00:00","2026-03-10 08:00:00")	cancelled	110.00	2026-03-11 01:37:08.784323+00	t	t
 3ffabeae-c4fb-430f-8f00-ed89b1fcb320	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-11 14:00:00","2026-03-11 15:00:00")	cancelled	1.00	2026-03-11 02:12:18.828825+00	t	t
@@ -217,6 +236,8 @@ df8d9995-8dde-4874-8e53-2df806ddec0a	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	0fa611
 d8cc621b-5867-4974-97ea-e050736b0808	d93d2b37-3720-4298-b70b-aaf8a94acee0	3b79579d-4939-465c-b5ca-1c5595ca7782	["2026-03-12 08:00:00","2026-03-12 13:00:00")	confirmed	0.00	2026-03-12 04:38:45.605185+00	f	f
 83dda961-5e65-4e79-b1d8-6b621fbc26ac	d93d2b37-3720-4298-b70b-aaf8a94acee0	3b79579d-4939-465c-b5ca-1c5595ca7782	["2026-03-12 14:00:00","2026-03-12 15:00:00")	confirmed	0.00	2026-03-12 04:54:19.929233+00	f	f
 c7ce99f6-b929-4bc7-a5fd-aca35fb85793	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-12 16:30:00","2026-03-12 17:30:00")	confirmed	0.00	2026-03-12 05:03:16.514567+00	f	f
+98c2e496-3a4e-4d55-9886-bc60324ade0e	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	0fa611b2-b287-4ad5-b793-d03408462b4b	["2026-03-14 10:30:00","2026-03-14 11:30:00")	cancelled	0.00	2026-03-14 06:23:32.960736+00	f	f
+e9e89517-ebe2-4026-9c8c-97c385c463a6	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	f4514731-440a-4aa7-9bb6-7df6c73ee37c	["2026-03-20 16:30:00","2026-03-20 17:30:00")	confirmed	0.00	2026-03-20 03:01:03.866986+00	f	f
 \.
 
 
@@ -224,10 +245,10 @@ c7ce99f6-b929-4bc7-a5fd-aca35fb85793	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	0fa611
 -- Data for Name: rooms; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY public.rooms (id, name, description, hourly_rate, shift_rate, capacity, created_at, locked_by_default) FROM stdin;
-c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	Consultório 1	Sala com um excelente infraestrurtura para suas consultas.	1.00	260.00	3	2026-03-04 04:15:19.770049+00	f
-d93d2b37-3720-4298-b70b-aaf8a94acee0	Consultório 2	Sala com um excelente infraestrurtura para suas consultas.	80.00	280.00	3	2026-03-04 04:15:19.769616+00	f
-0b5d4bf5-b66b-43bf-9575-0ca9925251f4	Consultório Carina Cigolini	Consultorio completo com equipamentos de ponta, oferecendo o melhor atendimento aos seus clientes.	90.00	600.00	4	2026-03-04 04:15:19.768064+00	t
+COPY public.rooms (id, name, description, hourly_rate, shift_rate, capacity, created_at, locked_by_default, photo1, photo2, photo3) FROM stdin;
+c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	Consultório 1	Sala com um excelente infraestrurtura para suas consultas.	1.00	260.00	3	2026-03-04 04:15:19.770049+00	f	http://localhost:3001/uploads/photo-1773982836341-645111960.png	http://localhost:3001/uploads/photo-1773982839625-829463225.png	http://localhost:3001/uploads/photo-1773982844731-950024189.png
+d93d2b37-3720-4298-b70b-aaf8a94acee0	Consultório 2	Sala com um excelente infraestrurtura para suas consultas.	80.00	280.00	3	2026-03-04 04:15:19.769616+00	f	http://localhost:3001/uploads/photo-1773982854332-680808846.png	http://localhost:3001/uploads/photo-1773982857281-929329716.png	http://localhost:3001/uploads/photo-1773982861456-626592981.png
+0b5d4bf5-b66b-43bf-9575-0ca9925251f4	Consultório 3	Consultorio completo com equipamentos de ponta, oferecendo o melhor atendimento aos seus clientes.	90.00	600.00	4	2026-03-04 04:15:19.768064+00	t	http://localhost:3001/uploads/photo-1773982806200-510544831.png	http://localhost:3001/uploads/photo-1773982809526-335354955.png	http://localhost:3001/uploads/photo-1773982812462-663203537.png
 \.
 
 
@@ -258,9 +279,9 @@ c5be221b-4a5b-43ed-9493-61227daf4bc6	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	Avulso
 COPY public.user_tickets (user_id, room_id, hourly_tickets, shift_tickets) FROM stdin;
 0fa611b2-b287-4ad5-b793-d03408462b4b	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	88	0
 3b79579d-4939-465c-b5ca-1c5595ca7782	d93d2b37-3720-4298-b70b-aaf8a94acee0	2	0
-0fa611b2-b287-4ad5-b793-d03408462b4b	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	4	3
-f4514731-440a-4aa7-9bb6-7df6c73ee37c	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	99999	99999
 3b79579d-4939-465c-b5ca-1c5595ca7782	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	1	0
+0fa611b2-b287-4ad5-b793-d03408462b4b	c4fd9a5f-3f4a-470d-91eb-e8dbea9a3f96	3	3
+f4514731-440a-4aa7-9bb6-7df6c73ee37c	0b5d4bf5-b66b-43bf-9575-0ca9925251f4	99993	99998
 \.
 
 
@@ -395,6 +416,22 @@ ALTER TABLE ONLY public.payments
 
 
 --
+-- Name: payments payments_room_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id) ON DELETE CASCADE;
+
+
+--
+-- Name: payments payments_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
 -- Name: released_slots released_slots_room_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -446,5 +483,5 @@ ALTER TABLE ONLY public.verification_codes
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ceHAm6hK0shabJhKOhwf8fcAkk5NAbtGYcouGNd6f83nCsuqwxk6uPCKnaZH1oJ
+\unrestrict qMrlPwpL1YWfTJXGieu6SQJMQURF0x3GUDTzCpPxnqsCv9OyHHri2eaaH3SPzOY
 
