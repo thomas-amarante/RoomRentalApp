@@ -289,6 +289,7 @@ export default function AdminDashboard() {
       if (res.ok) {
         alert('Saldos adicionados com sucesso!');
         setBalanceForm({ userId: '', roomId: '', hourlyTickets: 0, shiftTickets: 0 });
+        fetchData();
       } else {
         const data = await res.json();
         alert(data.error || 'Erro ao adicionar saldos');
