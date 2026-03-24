@@ -16,3 +16,6 @@ Thumbs.db
 .docker/
 postgres_data/
 
+# Backups do banco de dados
+backup_local.sql
+*.dump
